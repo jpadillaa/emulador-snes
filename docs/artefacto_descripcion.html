@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Artefacto Técnico Frontend Emulador SNES</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'base', themeVariables: { primaryColor: '#f3f4f6', primaryTextColor: '#1f2937', primaryBorderColor: '#d1d5db', lineColor: '#6b7280', fontFamily: 'Inter, sans-serif' } });
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+        }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            padding: 1.5rem;
+            height: 100%;
+        }
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background-color: #e0f2fe;
+            color: #0369a1;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto space-y-6">
+        
+        <!-- Encabezado -->
+        <header class="mb-8">
+            <div class="flex justify-between items-end border-b border-slate-200 pb-4">
+                <div>
+                    <span class="badge mb-2">Proyecto Interno</span>
+                    <h1 class="text-3xl font-bold text-slate-900">Frontend Emulador SNES macOS</h1>
+                    <p class="text-slate-500 mt-2">Artefacto de Arquitectura y Especificaciones Técnicas</p>
+                </div>
+                <div class="text-right text-sm text-slate-400 font-mono">
+                    VERSIÓN 1.0<br>
+                    ESTADO Propuesta
+                </div>
+            </div>
+        </header>
+
+        <!-- Resumen -->
+        <section class="card">
+            <h2 class="section-title">
+                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Resumen del Proyecto
+            </h2>
+            <p class="text-slate-600 leading-relaxed">
+                Diseño y desarrollo de una aplicación de escritorio nativa para macOS construida en Python. La aplicación actúa como una capa de presentación y gestión sobre un núcleo de emulación de Super Nintendo de terceros. El diseño prioriza la separación estricta entre la lógica de interfaz de usuario y el procesamiento de la emulación garantizando alta modularidad y bajo acoplamiento.
+            </p>
+        </section>
+
+        <!-- Alcance y Riesgos -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <section class="card border-l-4 border-l-blue-500">
+                <h2 class="section-title">Alcance</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <h3 class="font-medium text-slate-800 mb-2">Dentro del Proyecto</h3>
+                        <ul class="list-disc list-inside text-sm text-slate-600 space-y-1">
+                            <li>Interfaz gráfica nativa macOS</li>
+                            <li>Gestión de biblioteca de ROMs</li>
+                            <li>Configuración de controles y periféricos</li>
+                            <li>Persistencia de partidas guardadas</li>
+                            <li>Gestión de video y audio</li>
+                            <li>Puente de integración (Adaptador)</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-slate-800 mb-2">Fuera del Proyecto</h3>
+                        <ul class="list-disc list-inside text-sm text-slate-600 space-y-1">
+                            <li>Implementación de la emulación de hardware</li>
+                            <li>Procesamiento de señales de bajo nivel</li>
+                            <li>Desarrollo de motores de renderizado 3D</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card border-l-4 border-l-amber-500">
+                <h2 class="section-title">Riesgos y Dependencias</h2>
+                <ul class="list-disc list-inside text-sm text-slate-600 space-y-2">
+                    <li>Dependencia absoluta de la API del núcleo de emulación externo seleccionado</li>
+                    <li>Posible latencia introducida por el puente de comunicación entre Python y C/C++</li>
+                    <li>La implementación del Adaptador del Núcleo está sujeta a si el núcleo externo es una biblioteca compartida o un proceso independiente</li>
+                    <li>Actualizaciones en las políticas de seguridad de macOS (Gatekeeper) para captura de periféricos Bluetooth</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- Requerimientos -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <section class="card">
+                <h2 class="section-title">Requerimientos Funcionales</h2>
+                <ul class="space-y-2 text-sm text-slate-600">
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Analizar directorios locales para catalogar ROMs válidas</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Presentar biblioteca interactiva con metadatos y arte</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Proveer interfaz para configuración de controles y teclado</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Gestionar persistencia de estados de guardado</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Configurar parámetros de salida multimedia</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-emerald-500 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Capturar y renderizar búferes del núcleo de emulación</li>
+                </ul>
+            </section>
+
+            <section class="card">
+                <h2 class="section-title">Requerimientos No Funcionales</h2>
+                <ul class="space-y-2 text-sm text-slate-600">
+                    <li class="flex items-start"><svg class="w-4 h-4 text-slate-400 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="font-medium text-slate-700 mr-1">Mantenibilidad</span> Uso de segregación de interfaces y patrón adaptador</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-slate-400 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="font-medium text-slate-700 mr-1">Modularidad</span> Componentes independientes con responsabilidades únicas</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-slate-400 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="font-medium text-slate-700 mr-1">Rendimiento</span> Latencia imperceptible en la capa de integración de Python</li>
+                    <li class="flex items-start"><svg class="w-4 h-4 text-slate-400 mt-0.5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="font-medium text-slate-700 mr-1">UX</span> Alineación con estándares de diseño macOS integrando aceleración por hardware</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- Arquitectura -->
+        <section class="card">
+            <h2 class="section-title">
+                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                Arquitectura del Sistema
+            </h2>
+            
+            <div class="mb-8 overflow-x-auto bg-slate-50 rounded-lg p-4 flex justify-center border border-slate-100">
+                <div class="mermaid">
+                    graph TD
+                        UI[Capa de Presentación]
+                        Controlador[Controlador Principal]
+                        Lib[Gestor de Biblioteca]
+                        Config[Gestor de Configuración]
+                        Input[Gestor de Entrada]
+                        Bridge[Adaptador del Núcleo]
+                        Core[Núcleo Externo C/C++]
+                        DB[(BD Local)]
+
+                        UI --> Controlador
+                        Controlador --> Lib
+                        Controlador --> Config
+                        Controlador --> Input
+                        Controlador --> Bridge
+                        Lib --> DB
+                        Config --> DB
+                        Bridge --> Core
+                        Input --> Bridge
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="p-4 border border-slate-100 rounded-lg bg-slate-50">
+                    <h3 class="font-semibold text-slate-800 text-sm mb-1">Capa de Presentación</h3>
+                    <p class="text-xs text-slate-600">Renderiza la interfaz gráfica y la superficie de video. Recibe acciones del usuario e interactúa con el Controlador.</p>
+                </div>
+                <div class="p-4 border border-slate-100 rounded-lg bg-slate-50">
+                    <h3 class="font-semibold text-slate-800 text-sm mb-1">Gestor de Biblioteca</h3>
+                    <p class="text-xs text-slate-600">Escanea archivos locales, calcula firmas, obtiene metadatos y maneja el inventario en la base de datos local.</p>
+                </div>
+                <div class="p-4 border border-slate-100 rounded-lg bg-slate-50">
+                    <h3 class="font-semibold text-slate-800 text-sm mb-1">Gestor de Configuración</h3>
+                    <p class="text-xs text-slate-600">Centraliza y persiste preferencias de video, audio y atajos de teclado del usuario.</p>
+                </div>
+                <div class="p-4 border border-slate-100 rounded-lg bg-slate-50">
+                    <h3 class="font-semibold text-slate-800 text-sm mb-1">Gestor de Entrada</h3>
+                    <p class="text-xs text-slate-600">Detecta dispositivos Bluetooth, captura teclado y mapea eventos físicos a botones virtuales de SNES.</p>
+                </div>
+                <div class="p-4 border border-slate-100 rounded-lg bg-slate-50 md:col-span-2">
+                    <h3 class="font-semibold text-slate-800 text-sm mb-1">Adaptador del Núcleo (Bridge)</h3>
+                    <p class="text-xs text-slate-600">Aísla Python de la implementación del núcleo. Transfiere rutas ROM, estado de controles, comandos y extrae búferes multimedia y estados de guardado sin acoplar la UI al emulador base.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Flujo y Estructura -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section class="card">
+                <h2 class="section-title">Flujo de Usuario Principal</h2>
+                <ol class="relative border-l border-slate-200 ml-3 mt-4 space-y-4">                  
+                    <li class="mb-4 ml-6">
+                        <span class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">1</span>
+                        <h3 class="font-medium text-slate-800 text-sm">Inicio</h3>
+                        <p class="text-xs text-slate-500 mt-1">El SO inicia la app. El Controlador carga configuraciones previas.</p>
+                    </li>
+                    <li class="mb-4 ml-6">
+                        <span class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">2</span>
+                        <h3 class="font-medium text-slate-800 text-sm">Carga de Biblioteca</h3>
+                        <p class="text-xs text-slate-500 mt-1">El Gestor de Biblioteca consulta BD y renderiza cuadrícula asíncrona.</p>
+                    </li>
+                    <li class="mb-4 ml-6">
+                        <span class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">3</span>
+                        <h3 class="font-medium text-slate-800 text-sm">Ejecución</h3>
+                        <p class="text-xs text-slate-500 mt-1">El usuario selecciona ROM. El Adaptador inicializa el núcleo externo.</p>
+                    </li>
+                    <li class="mb-4 ml-6">
+                        <span class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">4</span>
+                        <h3 class="font-medium text-slate-800 text-sm">Interacción Continua</h3>
+                        <p class="text-xs text-slate-500 mt-1">El Gestor de Entrada envía pulsaciones. El Adaptador extrae frames para renderizado Metal.</p>
+                    </li>
+                    <li class="ml-6">
+                        <span class="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-4 ring-white text-blue-800 text-xs font-bold">5</span>
+                        <h3 class="font-medium text-slate-800 text-sm">Interrupción</h3>
+                        <p class="text-xs text-slate-500 mt-1">Usuario envía comando de pausa/guardado. El núcleo exporta estado a disco.</p>
+                    </li>
+                </ol>
+            </section>
+    </div>
+</body>
+</html>
