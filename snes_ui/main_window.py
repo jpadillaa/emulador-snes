@@ -1,0 +1,502 @@
+"""Ventana principal: orquesta layout, menus, atajos y estados de sesion.
+
+Centraliza el manejo de los cinco estados de la interfaz y el cableado entre
+la barra de acciones, los menus, el panel de control y el controlador de
+sesion. Toda la logica de emulacion queda detras del adaptador del nucleo.
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .core.adapter import create_core
+from .core.session import SessionController
+from .services.input_service import InputService, MappingModel
+from .services.save_service import SaveService
+from .settings import AppSettings
+from .state import ConnectionState, ScaleMode, SessionState
+from .theme import (
+    MARGIN_WINDOW,
+    STACK_GAP,
+    ThemeName,
+    WINDOW_INITIAL,
+    WINDOW_MINIMUM,
+    build_stylesheet,
+    palette_for,
+    system_font_family,
+)
+from .widgets.action_bar import ActionBar
+from .widgets.control_panel import ControlPanel
+from .widgets.game_stage import GameStage
+from .widgets.overlay_action_bar import OverlayActionBar
+from .widgets.toast import Toast
+
+
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("SNES Emulator")
+        self.setMinimumSize(*WINDOW_MINIMUM)
+
+        # -- servicios y estado --------------------------------------------
+        self._settings = AppSettings()
+        # Nucleo real (libretro) si la biblioteca esta disponible; si no, mock.
+        self._core = create_core()
+        self._session = SessionController(self._core, self)
+        self._input = InputService(self)
+        self._saves = SaveService()
+        self._mapping = MappingModel.defaults()
+        saved_maps = self._settings.mappings()
+        if saved_maps:
+            self._mapping.assignments.update(saved_maps)
+
+        self._theme_pref = self._settings.theme_preference()
+        self._theme = self._resolve_theme()
+        self._scale_mode = ScaleMode(self._settings.scale_mode())
+        self._pressed_inputs: set[str] = set()
+
+        self._build_ui()
+        self._build_menus()
+        self._connect_signals()
+        self._apply_theme()
+
+        # Restaurar dispositivo y pestaña persistidos.
+        self._input.set_current_device(self._settings.device())
+        self._panel.set_current_device(self._settings.device())
+        self._panel.set_active_tab(self._settings.active_tab())
+
+        self._restore_geometry()
+        self._on_state_changed(SessionState.EMPTY)
+
+        QApplication.instance().installEventFilter(self)
+
+    # -- construccion de UI -------------------------------------------------
+    def _build_ui(self) -> None:
+        central = QWidget()
+        central.setObjectName("WidgetCentral")
+        self.setCentralWidget(central)
+
+        body = QHBoxLayout(central)
+        body.setContentsMargins(MARGIN_WINDOW, MARGIN_WINDOW, MARGIN_WINDOW, MARGIN_WINDOW)
+        body.setSpacing(MARGIN_WINDOW)
+
+        # Area principal
+        self._main_area = QWidget()
+        main_layout = QVBoxLayout(self._main_area)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(STACK_GAP)
+
+        self._stage = GameStage()
+        self._stage.set_scale_mode(self._scale_mode)
+        main_layout.addWidget(self._stage, stretch=1)
+
+        self._action_bar = ActionBar()
+        main_layout.addWidget(self._action_bar)
+
+        body.addWidget(self._main_area, stretch=1)
+
+        # Panel de control
+        self._panel = ControlPanel(self._input, self._mapping, palette_for(self._theme))
+        body.addWidget(self._panel)
+
+        # Overlay de pantalla completa y toast (hijos del area principal)
+        self._overlay = OverlayActionBar(self._main_area)
+        self._toast = Toast(self._main_area)
+
+    def _build_menus(self) -> None:
+        bar = self.menuBar()
+
+        # --- Archivo ---
+        m_file = bar.addMenu("Archivo")
+        self._act_load = QAction("Cargar juego…", self)
+        self._act_load.setShortcut(QKeySequence("Ctrl+O"))
+        self._act_load.triggered.connect(self._flow_load_game)
+        m_file.addAction(self._act_load)
+
+        self._act_save = QAction("Guardar partida", self)
+        self._act_save.setShortcut(QKeySequence("Ctrl+S"))
+        self._act_save.triggered.connect(self._flow_save_state)
+        m_file.addAction(self._act_save)
+
+        self._act_loadstate = QAction("Cargar partida…", self)
+        self._act_loadstate.setShortcut(QKeySequence("Ctrl+L"))
+        self._act_loadstate.triggered.connect(self._flow_load_state)
+        m_file.addAction(self._act_loadstate)
+
+        m_file.addSeparator()
+        self._act_quit_session = QAction("Salir del juego", self)
+        self._act_quit_session.setShortcut(QKeySequence("Ctrl+W"))
+        self._act_quit_session.triggered.connect(self._flow_quit_game)
+        m_file.addAction(self._act_quit_session)
+
+        m_file.addSeparator()
+        act_exit = QAction("Salir de la aplicación", self)
+        act_exit.setShortcut(QKeySequence.StandardKey.Quit)
+        act_exit.triggered.connect(self.close)
+        m_file.addAction(act_exit)
+
+        # --- Ver ---
+        m_view = bar.addMenu("Ver")
+        self._act_pause = QAction("Pausar / Reanudar", self)
+        self._act_pause.setShortcut(QKeySequence(Qt.Key.Key_Space))
+        self._act_pause.triggered.connect(self._session.toggle_pause)
+        m_view.addAction(self._act_pause)
+
+        self._act_fullscreen = QAction("Pantalla completa", self)
+        self._act_fullscreen.setCheckable(True)
+        if sys.platform == "darwin":
+            self._act_fullscreen.setShortcut(QKeySequence("Ctrl+Meta+F"))
+        else:
+            self._act_fullscreen.setShortcut(QKeySequence(Qt.Key.Key_F11))
+        self._act_fullscreen.triggered.connect(self._toggle_fullscreen)
+        m_view.addAction(self._act_fullscreen)
+
+        m_view.addSeparator()
+
+        # Submenu modos de escalado
+        m_scale = m_view.addMenu("Modo de visualización")
+        self._scale_group = QActionGroup(self)
+        self._scale_group.setExclusive(True)
+        for mode in ScaleMode:
+            act = QAction(mode.label, self, checkable=True)
+            act.setData(mode)
+            act.setChecked(mode == self._scale_mode)
+            act.triggered.connect(lambda _=False, m=mode: self._set_scale_mode(m))
+            self._scale_group.addAction(act)
+            m_scale.addAction(act)
+
+        # Submenu tema
+        m_theme = m_view.addMenu("Tema")
+        self._theme_group = QActionGroup(self)
+        self._theme_group.setExclusive(True)
+        for label, value in (("Sistema", "system"), ("Claro", "light"), ("Oscuro", "dark")):
+            act = QAction(label, self, checkable=True)
+            act.setData(value)
+            act.setChecked(value == self._theme_pref)
+            act.triggered.connect(lambda _=False, v=value: self._set_theme_pref(v))
+            self._theme_group.addAction(act)
+            m_theme.addAction(act)
+
+    def _connect_signals(self) -> None:
+        self._session.state_changed.connect(self._on_state_changed)
+        self._session.frame_ready.connect(self._on_frame_ready)
+        self._session.error_raised.connect(self._stage.set_error_message)
+        self._session.rom_changed.connect(self._stage.set_loading_filename)
+
+        self._action_bar.triggered.connect(self._on_action)
+        self._overlay.triggered.connect(self._on_action)
+
+        self._stage.request_load.connect(self._flow_load_game)
+        self._stage.retry_requested.connect(self._flow_load_game)
+        self._stage.close_error_requested.connect(self._session.reset_to_empty)
+        self._stage.resume_requested.connect(self._session.resume)
+
+        self._panel.device_changed.connect(self._on_device_changed)
+        self._panel.refresh_requested.connect(self._on_refresh_devices)
+        self._panel.reset_requested.connect(self._flow_reset_mappings)
+
+        self._input.connection_changed.connect(self._panel.update_connection)
+        self._input.devices_changed.connect(self._panel.update_devices)
+
+        sh = QApplication.instance().styleHints()
+        if hasattr(sh, "colorSchemeChanged"):
+            sh.colorSchemeChanged.connect(self._on_system_scheme_changed)
+
+    # -- tema ----------------------------------------------------------------
+    def _resolve_theme(self) -> ThemeName:
+        if self._theme_pref == "light":
+            return ThemeName.LIGHT
+        if self._theme_pref == "dark":
+            return ThemeName.DARK
+        # system
+        sh = QApplication.instance().styleHints()
+        scheme = getattr(sh, "colorScheme", lambda: None)()
+        if scheme == Qt.ColorScheme.Dark:
+            return ThemeName.DARK
+        return ThemeName.LIGHT
+
+    def _apply_theme(self) -> None:
+        app = QApplication.instance()
+        # Fija explicitamente la fuente base de la app a una del sistema para
+        # evitar el alias inexistente "Sans Serif" que usan algunos backends.
+        app.setFont(QFont(system_font_family()))
+        app.setStyleSheet(build_stylesheet(self._theme))
+        self._panel.set_palette(palette_for(self._theme))
+
+    def _set_theme_pref(self, value: str) -> None:
+        self._theme_pref = value
+        self._settings.set_theme_preference(value)
+        self._theme = self._resolve_theme()
+        self._apply_theme()
+
+    def _on_system_scheme_changed(self, _scheme) -> None:
+        if self._theme_pref == "system":
+            self._theme = self._resolve_theme()
+            self._apply_theme()
+
+    # -- modo de escalado ----------------------------------------------------
+    def _set_scale_mode(self, mode: ScaleMode) -> None:
+        self._scale_mode = mode
+        self._stage.set_scale_mode(mode)
+        self._settings.set_scale_mode(mode.value)
+
+    # -- maquina de estados --------------------------------------------------
+    def _on_state_changed(self, state: SessionState) -> None:
+        self._stage.show_state(state)
+        active = state in (SessionState.RUNNING, SessionState.PAUSED)
+        self._action_bar.set_session_active(active)
+        self._overlay.set_session_active(active)
+        self._act_save.setEnabled(active)
+        self._act_loadstate.setEnabled(True)  # se puede cargar con o sin sesion
+        self._act_quit_session.setEnabled(active)
+        self._act_pause.setEnabled(active)
+
+    def _on_frame_ready(self) -> None:
+        self._stage.update_frame(self._core.get_frame())
+
+    # -- acciones (barra y overlay) -----------------------------------------
+    def _on_action(self, key: str) -> None:
+        {
+            "load_game": self._flow_load_game,
+            "save_state": self._flow_save_state,
+            "load_state": self._flow_load_state,
+            "quit_game": self._flow_quit_game,
+            "fullscreen": self._toggle_fullscreen,
+        }[key]()
+
+    # -- flujos --------------------------------------------------------------
+    def _flow_load_game(self) -> None:
+        start_dir = "ROMS" if os.path.isdir("ROMS") else os.path.expanduser("~")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Cargar juego", start_dir, "ROMs SNES (*.sfc *.smc)"
+        )
+        if not path:
+            return  # cancelado: sin cambios
+        self._session.begin_loading(path)
+        # Estado cargando perceptible antes de validar.
+        QTimer.singleShot(600, self._session.finish_loading)
+
+    def _flow_save_state(self) -> None:
+        if not self._session.has_session:
+            return
+        blob = self._session.save_state()
+        self._saves.create(self._session.rom_name, blob)
+        self._toast.show_message("✓ Partida guardada", "ok")
+
+    def _flow_load_state(self) -> None:
+        rom = self._session.rom_name or (self._core.title + ".sfc" if self._core.title else "")
+        states = self._saves.list_for(rom) if rom else []
+        dlg = _SaveStateDialog(states, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        chosen = dlg.selected()
+        if chosen is None:
+            return
+        if self._session.load_state(chosen.blob):
+            self._toast.show_message("✓ Partida restaurada", "ok")
+        else:
+            self._show_error_dialog("No se pudo restaurar el estado seleccionado.")
+
+    def _flow_quit_game(self) -> None:
+        if not self._session.has_session:
+            return
+        if self._session.is_dirty:
+            box = QMessageBox(self)
+            box.setWindowTitle("Salir del juego")
+            box.setText("Hay progreso sin guardar.")
+            box.setInformativeText("¿Deseas guardar antes de salir?")
+            save = box.addButton("Guardar y salir", QMessageBox.ButtonRole.AcceptRole)
+            discard = box.addButton("Salir sin guardar", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked == save:
+                self._flow_save_state()
+            elif clicked != discard:
+                return  # cancelar
+        if self.isFullScreen():
+            self._toggle_fullscreen()
+        self._stage.clear_video()
+        self._session.quit_session()
+
+    def _flow_reset_mappings(self) -> None:
+        res = QMessageBox.question(
+            self,
+            "Restablecer configuración",
+            "¿Restablecer todas las asignaciones a sus valores iniciales?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if res == QMessageBox.StandardButton.Yes:
+            self._mapping.reset()
+            self._panel.refresh_assignments_from_model()
+            self._toast.show_message("Configuración restablecida", "info")
+
+    # -- dispositivos --------------------------------------------------------
+    def _on_device_changed(self, name: str) -> None:
+        self._input.set_current_device(name)
+
+    def _on_refresh_devices(self) -> None:
+        self._input.refresh()
+
+    # -- pantalla completa ---------------------------------------------------
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+            self._panel.setVisible(True)
+            self._action_bar.setVisible(True)
+            self._overlay.setVisible(False)
+            self._act_fullscreen.setChecked(False)
+            self._main_area.setMouseTracking(False)
+        else:
+            self._panel.setVisible(False)
+            self._action_bar.setVisible(False)
+            self.showFullScreen()
+            self._act_fullscreen.setChecked(True)
+            self._overlay.set_session_active(self._session.has_session)
+            self._overlay.reveal()
+            self._main_area.setMouseTracking(True)
+
+    # -- captura de entrada (event filter) ----------------------------------
+    def eventFilter(self, obj, event):  # noqa: N802
+        et = event.type()
+        if et == QEvent.Type.KeyPress:
+            if self._handle_key_press(event):
+                return True
+        elif et == QEvent.Type.KeyRelease:
+            self._handle_key_release(event)
+        elif et == QEvent.Type.MouseMove and self.isFullScreen():
+            pos = self._main_area.mapFromGlobal(event.globalPosition().toPoint())
+            self._overlay.handle_mouse_y(pos.y())
+        return super().eventFilter(obj, event)
+
+    def _handle_key_press(self, event) -> bool:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            if self._panel.is_listening:
+                self._panel.cancel_listening()
+                return True
+            if self.isFullScreen():
+                self._toggle_fullscreen()
+                return True
+            return False
+        # Captura de asignacion de un boton de mapeo.
+        if self._panel.is_listening:
+            physical = self._physical_name_for(event)
+            self._panel.assign_physical(physical)
+            return True
+        # Entrada de juego: alimenta el nucleo (modelo pull) y el diagrama vivo.
+        if not event.isAutoRepeat():
+            input_key = self._input.input_for_key(key)
+            if input_key:
+                self._pressed_inputs.add(input_key)
+                self._panel.set_live_pressed(self._pressed_inputs)
+                retro_id = self._input.retro_id_for(input_key)
+                if retro_id is not None:
+                    self._core.set_input(retro_id, True)
+        return False
+
+    def _handle_key_release(self, event) -> None:
+        if event.isAutoRepeat():
+            return
+        input_key = self._input.input_for_key(event.key())
+        if input_key:
+            self._pressed_inputs.discard(input_key)
+            self._panel.set_live_pressed(self._pressed_inputs)
+            retro_id = self._input.retro_id_for(input_key)
+            if retro_id is not None:
+                self._core.set_input(retro_id, False)
+
+    def _physical_name_for(self, event) -> str:
+        device = self._input.current_device
+        if device == "Keyboard":
+            name = QKeySequence(event.key()).toString() or "Tecla"
+            return f"Tecla: {name}"
+        seq = QKeySequence(event.key()).toString() or "Botón"
+        return f"{device.split()[0]}: {seq}"
+
+    # -- persistencia / geometria -------------------------------------------
+    def _restore_geometry(self) -> None:
+        geo = self._settings.geometry()
+        if geo:
+            self.restoreGeometry(geo)
+        else:
+            self.resize(*WINDOW_INITIAL)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._settings.save_geometry(self.saveGeometry(), self.saveState())
+        self._settings.set_mappings(self._mapping.assignments)
+        self._settings.set_device(self._input.current_device)
+        self._settings.set_theme_preference(self._theme_pref)
+        self._settings.set_scale_mode(self._scale_mode.value)
+        self._settings.set_active_tab(self._panel.active_tab())
+        # Liberar el nucleo nativo de forma ordenada.
+        shutdown = getattr(self._core, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+        super().closeEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.isFullScreen():
+            self._overlay._reposition()
+
+
+class _SaveStateDialog(QDialog):
+    """Selector de estados guardados. Muestra estado vacio si no hay ninguno."""
+
+    def __init__(self, states, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Cargar partida")
+        self.setMinimumWidth(360)
+        self._states = states
+
+        layout = QVBoxLayout(self)
+        if not states:
+            empty = QLabel("No hay partidas guardadas para esta ROM.")
+            empty.setProperty("role", "body-lg")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setWordWrap(True)
+            layout.addWidget(empty)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            buttons.rejected.connect(self.reject)
+            layout.addWidget(buttons)
+            self._list = None
+            return
+
+        self._list = QListWidget()
+        for st in states:
+            self._list.addItem(st.label)
+        self._list.setCurrentRow(0)
+        self._list.itemDoubleClicked.connect(self.accept)
+        layout.addWidget(self._list)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected(self):
+        if not self._list:
+            return None
+        idx = self._list.currentRow()
+        if 0 <= idx < len(self._states):
+            return self._states[idx]
+        return None
