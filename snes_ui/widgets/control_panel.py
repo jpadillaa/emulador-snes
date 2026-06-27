@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..services.input_service import SNES_INPUTS, InputService, MappingModel
+from ..services.input_service import SNES_INPUTS, InputService, MappingProfiles
 from ..state import ConnectionState
 from ..theme import (
     GUTTER_SIDEBAR,
@@ -51,7 +51,8 @@ class ControlPanel(QFrame):
     def __init__(
         self,
         input_service: InputService,
-        mapping: MappingModel,
+        profiles: MappingProfiles,
+        device_key: str,
         palette: Palette,
         parent: QWidget | None = None,
     ) -> None:
@@ -60,7 +61,8 @@ class ControlPanel(QFrame):
         self.setFixedWidth(PANEL_WIDTH)
 
         self._input = input_service
-        self._mapping = mapping
+        self._profiles = profiles
+        self._device_key = device_key
         self._rows: dict[str, MappingRow] = {}
         self._listening_key: str | None = None
 
@@ -158,7 +160,8 @@ class ControlPanel(QFrame):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(8)
         for spec in SNES_INPUTS:
-            row = MappingRow(spec.key, spec.icon, spec.name, self._mapping.get(spec.key))
+            row = MappingRow(spec.key, spec.icon, spec.name,
+                             self._profiles.label_for(self._device_key, spec.key))
             row.listen_requested.connect(self._on_listen_requested)
             self._rows[spec.key] = row
             rl.addWidget(row)
@@ -205,6 +208,16 @@ class ControlPanel(QFrame):
     def update_devices(self, devices: list[str]) -> None:
         self._refresh_device_combo()
 
+    def set_gamepad_devices(self, names: list[str]) -> None:
+        """Puebla el combo con el teclado mas los mandos detectados."""
+        self._combo.blockSignals(True)
+        current = self._combo.currentText()
+        self._combo.clear()
+        self._combo.addItems(["Keyboard", *names])
+        idx = self._combo.findText(current)
+        self._combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo.blockSignals(False)
+
     def update_connection(self, state: ConnectionState) -> None:
         colors = {
             ConnectionState.CONNECTED: "#34C759",
@@ -247,20 +260,26 @@ class ControlPanel(QFrame):
             self._listening_key = None
             self.listening_changed.emit(False)
 
-    def assign_physical(self, physical: str) -> None:
-        """Asigna la entrada fisica detectada a la fila en escucha."""
+    def assign_captured(self, binding) -> None:
+        """Asigna el binding detectado (tecla o entrada de mando) a la fila."""
         if not self._listening_key:
             return
         key = self._listening_key
-        self._rows[key].set_assignment(physical)
-        self._mapping.assign(key, physical)
+        self._profiles.assign(self._device_key, key, binding)
+        self._rows[key].set_assignment(self._profiles.label_for(self._device_key, key))
         self._listening_key = None
         self.listening_changed.emit(False)
 
-    # -- mapeo / reset -------------------------------------------------------
+    # -- dispositivo activo / mapeo / reset ----------------------------------
+    def set_active_device_key(self, device_key: str, *, gamepad: bool) -> None:
+        """Cambia el perfil que muestra/edita el panel y refresca las filas."""
+        self._profiles.ensure(device_key, gamepad=gamepad)
+        self._device_key = device_key
+        self.refresh_assignments_from_model()
+
     def refresh_assignments_from_model(self) -> None:
         for key, row in self._rows.items():
-            row.set_assignment(self._mapping.get(key))
+            row.set_assignment(self._profiles.label_for(self._device_key, key))
 
     # -- diagrama en vivo ----------------------------------------------------
     def set_live_pressed(self, pressed: set[str]) -> None:

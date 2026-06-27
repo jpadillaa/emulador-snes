@@ -26,17 +26,16 @@ from .icons import glyph_icon
 class ActionSpec:
     key: str
     glyph: str
-    primary: str
-    secondary: str
+    label: str                   # etiqueta unica, corta y puntual
     needs_session: bool          # se deshabilita en estado vacio
 
 
 ACTIONS = [
-    ActionSpec("load_game", "📂", "Cargar juego", "Abrir ROM", False),
-    ActionSpec("save_state", "💾", "Guardar partida", "Guardar estado", True),
-    ActionSpec("load_state", "📥", "Cargar partida", "Cargar estado", True),
-    ActionSpec("quit_game", "🚪", "Salir", "Volver al menú", True),
-    ActionSpec("fullscreen", "⛶", "Pantalla completa", "Alternar", False),
+    ActionSpec("load_game", "📂", "Cargar juego", False),
+    ActionSpec("save_state", "💾", "Guardar partida", True),
+    ActionSpec("load_state", "📥", "Cargar partida", True),
+    ActionSpec("quit_game", "🚪", "Salir", True),
+    ActionSpec("fullscreen", "⛶", "Pantalla completa", False),
 ]
 
 
@@ -45,7 +44,7 @@ def _make_button(spec: ActionSpec) -> QToolButton:
     btn.setObjectName("AccionBarra")
     btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
     btn.setIcon(glyph_icon(spec.glyph, 24))
-    btn.setText(f"{spec.primary}\n{spec.secondary}")
+    btn.setText(spec.label)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setAutoRaise(True)
     btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
