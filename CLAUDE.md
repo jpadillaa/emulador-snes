@@ -16,23 +16,28 @@ When building UI features, treat `docs/descripcion_interfaz.md` as the authorita
 
 ```bash
 source .venv/bin/activate        # Python 3.14; deps in requirements.txt (PySide6 6.11, pygame)
+pip install -r requirements-dev.txt  # dev-only deps (pytest)
 python main.py                   # run the PySide6 GUI (real libretro core, mock fallback)
 python poc.py                    # run the libretro PoC (loads ./ROMS/SuperMarioKart.sfc, pygame window)
+python -m pytest                 # run the test suite (headless; conftest forces offscreen + isolated QSettings)
 ```
 
 Render the GUI headless for verification (offscreen): set `QT_QPA_PLATFORM=offscreen`, build `MainWindow`, drive `SessionController`, and `widget.grab().save(path)` to capture state screenshots.
 
-There is no test suite or linter configured. The libretro core (`kernel/snes9x_libretro.dylib`) is a prebuilt binary checked into the repo, not built here.
+Tests live in `tests/` (pytest); run `python -m pytest`. `tests/conftest.py` forces a headless `QApplication` (`QT_QPA_PLATFORM=offscreen`, `SDL_VIDEODRIVER=dummy`) and redirects `QSettings` to a temp dir so tests are hermetic — hence `AppSettings` builds `QSettings` with `defaultFormat()` (NativeFormat in production, redirectable in tests). No linter is configured. The libretro core (`kernel/snes9x_libretro.dylib`) is a prebuilt binary checked into the repo, not built here.
 
 ## GUI architecture (snes_ui/)
 
 Strict UI ↔ core isolation via an adapter so the core can be replaced without touching the UI:
-- `main_window.py` — `MainWindow`: top-level window that wires everything together (creates the core via `create_core()`, the `SessionController`, services, the action bars, the `ControlPanel`, the `GameStage`), opens ROMs through a `QFileDialog` (defaults to `ROMS/`, filter `*.sfc *.smc`), and manages full-screen presentation mode with the auto-hiding overlay bar.
+- `main_window.py` — `MainWindow`: top-level window that wires everything together (creates the core via `create_core()`, the `SessionController`, services incl. `GamepadService`, the action bars, the `ControlPanel`, the `GameStage`), opens ROMs through a `QFileDialog` (defaults to `ROMS/`, filter `*.sfc *.smc`), and manages full-screen presentation mode with the auto-hiding overlay bar. **Input routing is OR-combine**: keyboard always feeds the game and the selected gamepad adds to it — `_recompute_inputs()` unions `_kbd_pressed | _pad_pressed` and pushes the result to the core, so releasing a key never cancels a button the pad still holds. The device selector chooses the active gamepad and which profile the panel edits; remapping a row captures a key (keyboard active) or the next physical pad input (gamepad active).
 - `state.py` — shared enums: `SessionState` (the five stage views), `ScaleMode` (FIT_WINDOW / INTEGER / ORIGINAL / STRETCH video scaling), `ConnectionState` (controller connection). Import states from here; don't redefine them in widgets.
 - `core/adapter.py` — `EmulatorCore` ABC (the only contract the UI knows); `LibretroCore` (real ctypes binding to `snes9x_libretro`, video as `QImage` honoring pixel format + pitch, pull-model input, real serialize/unserialize save states, real-time audio); `MockEmulatorCore` (animated synthetic frames, fallback); `create_core()` picks one and tags it with `core.backend`. **Critical**: `LibretroCore` keeps its `CFUNCTYPE` callbacks as instance attrs — letting them be GC'd crashes the core. See `docs/IMPLEMENTACION.md` for the integration decisions.
 - `core/audio.py` — `AudioPlayer` wraps `QAudioSink` (QtMultimedia, no new dep) in push mode. The libretro audio-batch callback enqueues S16 stereo samples; `LibretroCore.run_frame` flushes them after `retro_run`. Audio lifecycle (`start/pause/resume/stop_audio`) lives on the `EmulatorCore` ABC (no-op default) and is driven by `SessionController` on state transitions. All on the main thread — `QAudioSink` plays on its own backend thread, writes never block.
 - `core/session.py` — `SessionController`: the single state machine for the five UI states (EMPTY/LOADING/RUNNING/PAUSED/ERROR) and a `QTimer` frame loop. Emits signals; `MainWindow` observes them to switch stage views and enable/disable session-dependent actions. **All session-state logic lives here** — don't scatter it into widgets.
-- `services/` — `InputService` (mock device enumeration, connection state, key profile, `MappingModel` of the 12 SNES inputs) and `SaveService` (in-memory save states).
+- `services/`:
+  - `input_service.py` — `InputService` (keyboard device + connection state), plus the input data model: `Binding` (a `kind`/`code`/`value` tuple covering keyboard keys and gamepad button/hat/axis) and `MappingProfiles` (per-device profiles keyed by `"keyboard"` or a gamepad's SDL GUID). `MappingProfiles` is the **single source of truth** for input mapping — used both to render the panel and to resolve gameplay input. Persisted as nested JSON with migration from the old flat `{input_key: keycode}` format.
+  - `gamepad_service.py` — `GamepadService(QObject)`: real gamepad support via `pygame.joystick` (SDL `dummy` video driver, polled by its own ~60 Hz `QTimer` on the main thread — SDL requires it). Reads through a `_PadBackend` seam (`_PygamePadBackend` in production, a fake in tests). Handles enumeration, hot-plug, a feed mode (`translate()` state→SNES inputs, with the left stick mirroring the D-Pad) and a capture mode (`detect_binding()` for remapping). Degrades to no-op if pygame is unavailable. Pure `translate`/`detect_binding` functions are tested without hardware.
+  - `save_service.py` — `SaveService`: save states persisted to disk under `AppDataLocation/saves/<rom>/` with a real timestamp and a PNG thumbnail; lazy blob reads, delete support.
 - `widgets/` — reusable components:
   - `game_stage.py` — `GameStage`, a `QStackedWidget` of the 5 stage views, each (except RUNNING) built from `StateCard`.
   - `video_surface.py` — `VideoSurface` presents the core's `QImage`, applying the four `ScaleMode`s with letterboxing and respecting `devicePixelRatio`.
