@@ -58,7 +58,7 @@ class AppSettings:
         self._s.setValue("input/device", name)
 
     # -- asignaciones --------------------------------------------------------
-    def mappings(self) -> dict[str, str] | None:
+    def mappings(self) -> dict[str, int] | None:
         raw = self._s.value("input/mappings")
         if not raw:
             return None
@@ -67,5 +67,5 @@ class AppSettings:
         except (json.JSONDecodeError, TypeError):
             return None
 
-    def set_mappings(self, mappings: dict[str, str]) -> None:
+    def set_mappings(self, mappings: dict[str, int]) -> None:
         self._s.setValue("input/mappings", json.dumps(mappings))

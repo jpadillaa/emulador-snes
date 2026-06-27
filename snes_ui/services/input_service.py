@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QKeySequence
 
 from ..state import ConnectionState
 
@@ -22,68 +23,93 @@ class SnesInput:
     name: str           # nombre mostrado
     icon: str           # caracter/icono representativo
     retro_id: int       # id libretro del boton
-    default: str        # asignacion fisica inicial
 
 
 SNES_INPUTS: list[SnesInput] = [
-    SnesInput("up", "D-Pad Arriba", "↑", 4, "Eje Y-"),
-    SnesInput("down", "D-Pad Abajo", "↓", 5, "Eje Y+"),
-    SnesInput("left", "D-Pad Izquierda", "←", 6, "Eje X-"),
-    SnesInput("right", "D-Pad Derecha", "→", 7, "Eje X+"),
-    SnesInput("a", "A", "Ⓐ", 8, "Botón B"),
-    SnesInput("b", "B", "Ⓑ", 0, "Botón A"),
-    SnesInput("x", "X", "Ⓧ", 9, "Botón Y"),
-    SnesInput("y", "Y", "Ⓨ", 1, "Botón X"),
-    SnesInput("select", "Select", "▭", 2, "Botón View"),
-    SnesInput("start", "Start", "▶", 3, "Botón Menu"),
-    SnesInput("l", "L", "⮜", 10, "Botón LB"),
-    SnesInput("r", "R", "⮞", 11, "Botón RB"),
+    SnesInput("up", "D-Pad Arriba", "↑", 4),
+    SnesInput("down", "D-Pad Abajo", "↓", 5),
+    SnesInput("left", "D-Pad Izquierda", "←", 6),
+    SnesInput("right", "D-Pad Derecha", "→", 7),
+    SnesInput("a", "A", "Ⓐ", 8),
+    SnesInput("b", "B", "Ⓑ", 0),
+    SnesInput("x", "X", "Ⓧ", 9),
+    SnesInput("y", "Y", "Ⓨ", 1),
+    SnesInput("select", "Select", "▭", 2),
+    SnesInput("start", "Start", "▶", 3),
+    SnesInput("l", "L", "⮜", 10),
+    SnesInput("r", "R", "⮞", 11),
 ]
 
 DEFAULT_DEVICES = [
     "Keyboard",
 ]
 
+# Perfil de teclado por defecto: input_key del SNES -> codigo Qt.Key.
+# Replica el MAPEO_TECLADO de poc.py y es la fuente unica de verdad tanto
+# para mostrar la asignacion en el panel como para alimentar el nucleo.
+DEFAULT_KEYBOARD: dict[str, int] = {
+    "up": 0x01000013,      # Qt.Key_Up
+    "down": 0x01000015,    # Qt.Key_Down
+    "left": 0x01000012,    # Qt.Key_Left
+    "right": 0x01000014,   # Qt.Key_Right
+    "a": 0x58,             # X
+    "b": 0x5A,             # Z
+    "x": 0x53,             # S
+    "y": 0x41,             # A
+    "l": 0x51,             # Q
+    "r": 0x57,             # W
+    "start": 0x01000004,   # Return
+    "select": 0x01000020,  # Shift  (equivalente al RSHIFT de poc.py)
+}
+
+
+def key_label(code: int | None) -> str:
+    """Etiqueta legible para mostrar un codigo de tecla Qt en el panel."""
+    if not code:
+        return "Sin asignar"
+    name = QKeySequence(code).toString()
+    return f"Tecla: {name}" if name else "Sin asignar"
+
 
 @dataclass
 class MappingModel:
-    """Mapa logico SNES -> entrada fisica. Reutilizable y restaurable."""
-    assignments: dict[str, str] = field(default_factory=dict)
+    """Mapa logico SNES -> codigo de tecla fisica. Restaurable y persistible.
+
+    Es la unica fuente de verdad de las asignaciones: el panel muestra la
+    etiqueta derivada del codigo y la ventana resuelve las pulsaciones de
+    juego contra este modelo, de modo que reasignar una tecla surte efecto
+    inmediato en la emulacion.
+    """
+    bindings: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def defaults(cls) -> "MappingModel":
-        return cls({i.key: i.default for i in SNES_INPUTS})
+        return cls(dict(DEFAULT_KEYBOARD))
 
-    def assign(self, input_key: str, physical: str) -> None:
-        self.assignments[input_key] = physical
+    def assign(self, input_key: str, code: int) -> None:
+        self.bindings[input_key] = code
 
     def reset(self) -> None:
-        self.assignments = {i.key: i.default for i in SNES_INPUTS}
+        self.bindings = dict(DEFAULT_KEYBOARD)
 
-    def get(self, input_key: str) -> str:
-        return self.assignments.get(input_key, "")
+    def code_for(self, input_key: str) -> int | None:
+        return self.bindings.get(input_key)
+
+    def label_for(self, input_key: str) -> str:
+        return key_label(self.bindings.get(input_key))
+
+    def input_for_code(self, code: int) -> str | None:
+        """Entrada SNES asignada a un codigo de tecla fisica (busqueda inversa)."""
+        for input_key, bound in self.bindings.items():
+            if bound == code:
+                return input_key
+        return None
 
 
 class InputService(QObject):
     """Enumeracion de dispositivos y estado de conexion (simulados)."""
     devices_changed = Signal(list)                 # list[str]
     connection_changed = Signal(ConnectionState)
-    # Mapa de teclas fisicas (Qt.Key) -> input_key del SNES, para el diagrama
-    # en vivo y la captura de asignaciones.
-    KEY_PROFILE = {
-        "up": 0x01000013,      # Qt.Key_Up
-        "down": 0x01000015,    # Qt.Key_Down
-        "left": 0x01000012,    # Qt.Key_Left
-        "right": 0x01000014,   # Qt.Key_Right
-        "a": 0x58,             # X
-        "b": 0x5A,             # Z
-        "x": 0x53,             # S
-        "y": 0x41,             # A
-        "l": 0x51,             # Q
-        "r": 0x57,             # W
-        "start": 0x01000004,   # Return
-        "select": 0x01000020,  # Shift  (equivalente al RSHIFT de poc.py)
-    }
 
     # input_key -> id libretro del boton, para alimentar el nucleo real.
     RETRO_ID = {i.key: i.retro_id for i in SNES_INPUTS}
@@ -139,13 +165,6 @@ class InputService(QObject):
             ][cycle]
         self.devices_changed.emit(self.devices)
         self._set_connection(state)
-
-    def input_for_key(self, qt_key: int) -> str | None:
-        """Devuelve el input_key del SNES asociado a una tecla fisica."""
-        for input_key, key_code in self.KEY_PROFILE.items():
-            if key_code == qt_key:
-                return input_key
-        return None
 
     def retro_id_for(self, input_key: str) -> int | None:
         """Devuelve el id libretro del boton para un input_key del SNES."""

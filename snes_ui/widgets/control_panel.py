@@ -158,7 +158,7 @@ class ControlPanel(QFrame):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(8)
         for spec in SNES_INPUTS:
-            row = MappingRow(spec.key, spec.icon, spec.name, self._mapping.get(spec.key))
+            row = MappingRow(spec.key, spec.icon, spec.name, self._mapping.label_for(spec.key))
             row.listen_requested.connect(self._on_listen_requested)
             self._rows[spec.key] = row
             rl.addWidget(row)
@@ -247,20 +247,20 @@ class ControlPanel(QFrame):
             self._listening_key = None
             self.listening_changed.emit(False)
 
-    def assign_physical(self, physical: str) -> None:
-        """Asigna la entrada fisica detectada a la fila en escucha."""
+    def assign_physical(self, code: int) -> None:
+        """Asigna el codigo de tecla detectado a la fila en escucha."""
         if not self._listening_key:
             return
         key = self._listening_key
-        self._rows[key].set_assignment(physical)
-        self._mapping.assign(key, physical)
+        self._mapping.assign(key, code)
+        self._rows[key].set_assignment(self._mapping.label_for(key))
         self._listening_key = None
         self.listening_changed.emit(False)
 
     # -- mapeo / reset -------------------------------------------------------
     def refresh_assignments_from_model(self) -> None:
         for key, row in self._rows.items():
-            row.set_assignment(self._mapping.get(key))
+            row.set_assignment(self._mapping.label_for(key))
 
     # -- diagrama en vivo ----------------------------------------------------
     def set_live_pressed(self, pressed: set[str]) -> None:

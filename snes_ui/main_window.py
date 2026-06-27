@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QFont, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QVBoxLayout,
@@ -64,7 +65,11 @@ class MainWindow(QMainWindow):
         self._mapping = MappingModel.defaults()
         saved_maps = self._settings.mappings()
         if saved_maps:
-            self._mapping.assignments.update(saved_maps)
+            # Solo se aceptan codigos de tecla (int); se descartan asignaciones
+            # de un formato anterior (cadenas) para no romper la resolucion.
+            self._mapping.bindings.update(
+                {k: v for k, v in saved_maps.items() if isinstance(v, int)}
+            )
 
         self._theme_pref = self._settings.theme_preference()
         self._theme = self._resolve_theme()
@@ -289,26 +294,36 @@ class MainWindow(QMainWindow):
         if not path:
             return  # cancelado: sin cambios
         self._session.begin_loading(path)
-        # Estado cargando perceptible antes de validar.
-        QTimer.singleShot(600, self._session.finish_loading)
+        # Cede el control al event loop una vez (sin retraso artificial) para
+        # que la vista CARGANDO se pinte antes de la carga sincrona del nucleo.
+        QTimer.singleShot(0, self._session.finish_loading)
 
     def _flow_save_state(self) -> None:
         if not self._session.has_session:
             return
         blob = self._session.save_state()
-        self._saves.create(self._session.rom_name, blob)
+        if not blob:
+            self._show_error_dialog("El núcleo no pudo serializar el estado actual.")
+            return
+        # Miniatura del fotograma vigente para previsualizar la partida.
+        self._saves.create(self._session.rom_name, blob, self._core.get_frame())
         self._toast.show_message("✓ Partida guardada", "ok")
 
     def _flow_load_state(self) -> None:
         rom = self._session.rom_name or (self._core.title + ".sfc" if self._core.title else "")
         states = self._saves.list_for(rom) if rom else []
-        dlg = _SaveStateDialog(states, self)
+        dlg = _SaveStateDialog(states, self._saves, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         chosen = dlg.selected()
         if chosen is None:
             return
-        if self._session.load_state(chosen.blob):
+        try:
+            blob = chosen.read_blob()
+        except OSError:
+            self._show_error_dialog("No se pudo leer el archivo de la partida.")
+            return
+        if self._session.load_state(blob):
             self._toast.show_message("✓ Partida restaurada", "ok")
         else:
             self._show_error_dialog("No se pudo restaurar el estado seleccionado.")
@@ -395,14 +410,15 @@ class MainWindow(QMainWindow):
                 self._toggle_fullscreen()
                 return True
             return False
-        # Captura de asignacion de un boton de mapeo.
+        # Captura de asignacion de un boton de mapeo: se guarda el codigo de
+        # tecla pulsado, que el modelo usara tanto para mostrar como para jugar.
         if self._panel.is_listening:
-            physical = self._physical_name_for(event)
-            self._panel.assign_physical(physical)
+            self._panel.assign_physical(key)
             return True
         # Entrada de juego: alimenta el nucleo (modelo pull) y el diagrama vivo.
+        # Se resuelve contra el mapeo activo, de modo que reasignar surte efecto.
         if not event.isAutoRepeat():
-            input_key = self._input.input_for_key(key)
+            input_key = self._mapping.input_for_code(key)
             if input_key:
                 self._pressed_inputs.add(input_key)
                 self._panel.set_live_pressed(self._pressed_inputs)
@@ -414,21 +430,13 @@ class MainWindow(QMainWindow):
     def _handle_key_release(self, event) -> None:
         if event.isAutoRepeat():
             return
-        input_key = self._input.input_for_key(event.key())
+        input_key = self._mapping.input_for_code(event.key())
         if input_key:
             self._pressed_inputs.discard(input_key)
             self._panel.set_live_pressed(self._pressed_inputs)
             retro_id = self._input.retro_id_for(input_key)
             if retro_id is not None:
                 self._core.set_input(retro_id, False)
-
-    def _physical_name_for(self, event) -> str:
-        device = self._input.current_device
-        if device == "Keyboard":
-            name = QKeySequence(event.key()).toString() or "Tecla"
-            return f"Tecla: {name}"
-        seq = QKeySequence(event.key()).toString() or "Botón"
-        return f"{device.split()[0]}: {seq}"
 
     # -- persistencia / geometria -------------------------------------------
     def _restore_geometry(self) -> None:
@@ -440,7 +448,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._settings.save_geometry(self.saveGeometry(), self.saveState())
-        self._settings.set_mappings(self._mapping.assignments)
+        self._settings.set_mappings(self._mapping.bindings)
         self._settings.set_device(self._input.current_device)
         self._settings.set_theme_preference(self._theme_pref)
         self._settings.set_scale_mode(self._scale_mode.value)
@@ -458,13 +466,18 @@ class MainWindow(QMainWindow):
 
 
 class _SaveStateDialog(QDialog):
-    """Selector de estados guardados. Muestra estado vacio si no hay ninguno."""
+    """Selector de estados guardados con miniatura, fecha y borrado.
 
-    def __init__(self, states, parent=None) -> None:
+    Muestra un estado vacio si la ROM no tiene partidas. Cada elemento lleva
+    el SaveState asociado en su UserRole, de modo que la seleccion y el
+    borrado funcionan aunque la lista cambie.
+    """
+
+    def __init__(self, states, service, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Cargar partida")
-        self.setMinimumWidth(360)
-        self._states = states
+        self.setMinimumWidth(420)
+        self._service = service
 
         layout = QVBoxLayout(self)
         if not states:
@@ -480,8 +493,13 @@ class _SaveStateDialog(QDialog):
             return
 
         self._list = QListWidget()
+        self._list.setIconSize(QSize(96, 72))
         for st in states:
-            self._list.addItem(st.label)
+            item = QListWidgetItem(f"{st.rom_name}\n{st.label}")
+            if st.thumb_path is not None:
+                item.setIcon(QIcon(QPixmap(str(st.thumb_path))))
+            item.setData(Qt.ItemDataRole.UserRole, st)
+            self._list.addItem(item)
         self._list.setCurrentRow(0)
         self._list.itemDoubleClicked.connect(self.accept)
         layout.addWidget(self._list)
@@ -489,14 +507,34 @@ class _SaveStateDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel
         )
+        self._delete_btn = buttons.addButton(
+            "Eliminar", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        self._delete_btn.clicked.connect(self._on_delete)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _on_delete(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        st = item.data(Qt.ItemDataRole.UserRole)
+        res = QMessageBox.question(
+            self,
+            "Eliminar partida",
+            f"¿Eliminar la partida guardada del {st.label}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if res != QMessageBox.StandardButton.Yes:
+            return
+        self._service.delete(st)
+        self._list.takeItem(self._list.row(item))
+        if self._list.count() == 0:
+            self.reject()  # ya no queda nada que cargar
+
     def selected(self):
         if not self._list:
             return None
-        idx = self._list.currentRow()
-        if 0 <= idx < len(self._states):
-            return self._states[idx]
-        return None
+        item = self._list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
