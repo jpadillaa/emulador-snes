@@ -208,6 +208,16 @@ class ControlPanel(QFrame):
     def update_devices(self, devices: list[str]) -> None:
         self._refresh_device_combo()
 
+    def set_gamepad_devices(self, names: list[str]) -> None:
+        """Puebla el combo con el teclado mas los mandos detectados."""
+        self._combo.blockSignals(True)
+        current = self._combo.currentText()
+        self._combo.clear()
+        self._combo.addItems(["Keyboard", *names])
+        idx = self._combo.findText(current)
+        self._combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo.blockSignals(False)
+
     def update_connection(self, state: ConnectionState) -> None:
         colors = {
             ConnectionState.CONNECTED: "#34C759",

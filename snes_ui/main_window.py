@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from .core.adapter import create_core
 from .core.session import SessionController
+from .services.gamepad_service import GamepadService
 from .services.input_service import (
     InputService,
     MappingProfiles,
@@ -67,6 +68,8 @@ class MainWindow(QMainWindow):
         self._core = create_core()
         self._session = SessionController(self._core, self)
         self._input = InputService(self)
+        self._gamepad = GamepadService(parent=self)
+        self._pad_by_name: dict[str, object] = {}   # nombre -> PadInfo
         self._saves = SaveService()
         # Perfiles de asignacion por dispositivo (migra el formato anterior).
         self._profiles = MappingProfiles.from_json(self._settings.profiles_json())
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         self._on_state_changed(SessionState.EMPTY)
 
         QApplication.instance().installEventFilter(self)
+        self._gamepad.start()
 
     # -- construccion de UI -------------------------------------------------
     def _build_ui(self) -> None:
@@ -217,11 +221,20 @@ class MainWindow(QMainWindow):
         self._stage.resume_requested.connect(self._session.resume)
 
         self._panel.device_changed.connect(self._on_device_changed)
-        self._panel.refresh_requested.connect(self._on_refresh_devices)
         self._panel.reset_requested.connect(self._flow_reset_mappings)
+        self._panel.listening_changed.connect(self._on_listening_changed)
 
+        # El indicador de conexion del teclado (siempre conectado); el gamepad
+        # lo sobrescribe cuando hay mando activo.
         self._input.connection_changed.connect(self._panel.update_connection)
-        self._input.devices_changed.connect(self._panel.update_devices)
+
+        # Gamepad: el combo de dispositivos y la conexion los gobierna el
+        # servicio; el boton de refrescar re-enumera mandos.
+        self._gamepad.pressed_changed.connect(self._on_pad_pressed)
+        self._gamepad.binding_captured.connect(self._on_pad_binding_captured)
+        self._gamepad.devices_changed.connect(self._on_pad_devices_changed)
+        self._gamepad.connection_changed.connect(self._panel.update_connection)
+        self._panel.refresh_requested.connect(self._gamepad.poll_once)
 
         sh = QApplication.instance().styleHints()
         if hasattr(sh, "colorSchemeChanged"):
@@ -376,12 +389,42 @@ class MainWindow(QMainWindow):
             self._panel.refresh_assignments_from_model()
             self._toast.show_message("Configuración restablecida", "info")
 
-    # -- dispositivos --------------------------------------------------------
+    # -- dispositivos / gamepad ---------------------------------------------
     def _on_device_changed(self, name: str) -> None:
-        self._input.set_current_device(name)
+        # El teclado siempre alimenta el juego; este selector elige el mando
+        # activo y que perfil edita el panel.
+        if name == "Keyboard" or name not in self._pad_by_name:
+            self._active_device_key = KEYBOARD_KEY
+            self._panel.set_active_device_key(KEYBOARD_KEY, gamepad=False)
+            self._gamepad.set_active(None, {})
+            self._pad_pressed = set()
+            self._recompute_inputs()
+            return
+        info = self._pad_by_name[name]
+        self._active_device_key = info.guid
+        self._profiles.ensure(info.guid, gamepad=True)
+        self._panel.set_active_device_key(info.guid, gamepad=True)
+        self._gamepad.set_active(info.instance_id, self._profiles.profile(info.guid))
 
-    def _on_refresh_devices(self) -> None:
-        self._input.refresh()
+    def _on_pad_pressed(self, pressed: set) -> None:
+        self._pad_pressed = set(pressed)
+        self._recompute_inputs()
+
+    def _on_pad_devices_changed(self, devices: list) -> None:
+        self._pad_by_name = {d.name: d for d in devices}
+        self._panel.set_gamepad_devices([d.name for d in devices])
+        # Auto-seleccionar el primer mando si seguimos en teclado.
+        if self._active_device_key == KEYBOARD_KEY and devices:
+            self._panel.set_current_device(devices[0].name)
+
+    def _on_pad_binding_captured(self, binding) -> None:
+        if self._panel.is_listening:
+            self._panel.assign_captured(binding)
+        self._gamepad.set_capture(False)
+
+    def _on_listening_changed(self, listening: bool) -> None:
+        # Captura por mando solo si el dispositivo activo es un mando.
+        self._gamepad.set_capture(listening and self._active_device_key != KEYBOARD_KEY)
 
     # -- pantalla completa ---------------------------------------------------
     def _toggle_fullscreen(self) -> None:
@@ -424,10 +467,12 @@ class MainWindow(QMainWindow):
                 self._toggle_fullscreen()
                 return True
             return False
-        # Captura de asignacion: la tecla pulsada se guarda como Binding de
-        # teclado en el perfil del teclado.
+        # Captura de asignacion: si el dispositivo activo es el teclado, la
+        # tecla pulsada se guarda como Binding; si es un mando, las teclas se
+        # ignoran (la captura la resuelve el GamepadService).
         if self._panel.is_listening:
-            self._panel.assign_captured(key_binding(key))
+            if self._active_device_key == KEYBOARD_KEY:
+                self._panel.assign_captured(key_binding(key))
             return True
         # Entrada de juego: resuelve la tecla contra el perfil del teclado y
         # recompone la union teclado+mando.
@@ -461,6 +506,7 @@ class MainWindow(QMainWindow):
         self._settings.set_theme_preference(self._theme_pref)
         self._settings.set_scale_mode(self._scale_mode.value)
         self._settings.set_active_tab(self._panel.active_tab())
+        self._gamepad.stop()
         # Liberar el nucleo nativo de forma ordenada.
         shutdown = getattr(self._core, "shutdown", None)
         if callable(shutdown):
