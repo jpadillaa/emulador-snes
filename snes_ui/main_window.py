@@ -116,6 +116,8 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(STACK_GAP)
 
         self._stage = GameStage()
+        # En pantalla completa o maximizado se fuerza 4:3 (ver _aspect_locked).
+        self._aspect_locked = False
         self._stage.set_scale_mode(self._scale_mode)
         main_layout.addWidget(self._stage, stretch=1)
 
@@ -274,9 +276,31 @@ class MainWindow(QMainWindow):
 
     # -- modo de escalado ----------------------------------------------------
     def _set_scale_mode(self, mode: ScaleMode) -> None:
+        # Guarda la preferencia del usuario; el modo efectivo en pantalla puede
+        # estar forzado a 4:3 mientras la ventana esta en pantalla completa o
+        # maximizada (ver _apply_effective_scale_mode).
         self._scale_mode = mode
-        self._stage.set_scale_mode(mode)
         self._settings.set_scale_mode(mode.value)
+        self._apply_effective_scale_mode()
+
+    # -- bloqueo de relacion de aspecto 4:3 ----------------------------------
+    def _apply_effective_scale_mode(self) -> None:
+        """Aplica 4:3 (Ajuste a ventana) si esta bloqueado; si no, el modo del usuario."""
+        effective = ScaleMode.FIT_WINDOW if self._aspect_locked else self._scale_mode
+        self._stage.set_scale_mode(effective)
+
+    def _update_aspect_lock(self) -> None:
+        """Fuerza 4:3 en pantalla completa o maximizado; restaura al salir."""
+        locked = self.isFullScreen() or self.isMaximized()
+        if locked == self._aspect_locked:
+            return
+        self._aspect_locked = locked
+        self._apply_effective_scale_mode()
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._update_aspect_lock()
+        super().changeEvent(event)
 
     # -- maquina de estados --------------------------------------------------
     def _on_state_changed(self, state: SessionState) -> None:
