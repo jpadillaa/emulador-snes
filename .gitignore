@@ -12,6 +12,10 @@ dist/
 venv/
 env/
 
+# ROMs (no versionar imágenes de juego)
+*.sfc
+*.smc
+
 # macOS
 .DS_Store
 
