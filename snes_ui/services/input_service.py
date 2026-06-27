@@ -7,6 +7,7 @@ real sustituiria la enumeracion y la captura sin cambiar la UI.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QObject, Signal
@@ -103,6 +104,102 @@ class Binding:
 
 def key_binding(code: int) -> Binding:
     return Binding("key", code)
+
+
+KEYBOARD_KEY = "keyboard"
+
+
+def default_keyboard_profile() -> dict[str, Binding]:
+    return {k: key_binding(c) for k, c in DEFAULT_KEYBOARD.items()}
+
+
+# Layout estandar (estilo Xbox): indices de boton/hat de pygame.
+DEFAULT_GAMEPAD: dict[str, Binding] = {
+    "b": Binding("button", 0),
+    "a": Binding("button", 1),
+    "y": Binding("button", 2),
+    "x": Binding("button", 3),
+    "l": Binding("button", 4),
+    "r": Binding("button", 5),
+    "select": Binding("button", 6),
+    "start": Binding("button", 7),
+    "up": Binding("hat", 0, pack_hat(0, 1)),
+    "down": Binding("hat", 0, pack_hat(0, -1)),
+    "left": Binding("hat", 0, pack_hat(-1, 0)),
+    "right": Binding("hat", 0, pack_hat(1, 0)),
+}
+
+
+class MappingProfiles:
+    """Perfiles de asignacion por dispositivo (teclado y mandos)."""
+
+    def __init__(self) -> None:
+        self._profiles: dict[str, dict[str, Binding]] = {}
+
+    def _defaults(self, *, gamepad: bool) -> dict[str, Binding]:
+        return dict(DEFAULT_GAMEPAD) if gamepad else default_keyboard_profile()
+
+    def ensure(self, device_key: str, *, gamepad: bool) -> None:
+        if device_key not in self._profiles:
+            self._profiles[device_key] = self._defaults(gamepad=gamepad)
+
+    def profile(self, device_key: str) -> dict[str, Binding]:
+        return self._profiles.get(device_key, {})
+
+    def binding(self, device_key: str, input_key: str) -> "Binding | None":
+        return self._profiles.get(device_key, {}).get(input_key)
+
+    def label_for(self, device_key: str, input_key: str) -> str:
+        b = self.binding(device_key, input_key)
+        return b.label() if b else "Sin asignar"
+
+    def assign(self, device_key: str, input_key: str, binding: Binding) -> None:
+        self._profiles.setdefault(device_key, {})[input_key] = binding
+
+    def reset(self, device_key: str, *, gamepad: bool) -> None:
+        self._profiles[device_key] = self._defaults(gamepad=gamepad)
+
+    def input_for_key(self, device_key: str, code: int) -> "str | None":
+        for input_key, b in self._profiles.get(device_key, {}).items():
+            if b.kind == "key" and b.code == code:
+                return input_key
+        return None
+
+    def to_json(self) -> str:
+        data = {
+            dk: {ik: b.to_dict() for ik, b in prof.items()}
+            for dk, prof in self._profiles.items()
+        }
+        return json.dumps(data)
+
+    @classmethod
+    def from_json(cls, raw: "str | None") -> "MappingProfiles":
+        out = cls()
+        if not raw:
+            return out
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return out
+        if not isinstance(data, dict):
+            return out
+        # Formato heredado (plano): {input_key: int} -> perfil de teclado.
+        if data and all(isinstance(v, int) for v in data.values()):
+            out._profiles[KEYBOARD_KEY] = {
+                ik: key_binding(code) for ik, code in data.items()
+            }
+            return out
+        # Formato anidado por dispositivo.
+        for dk, prof in data.items():
+            if not isinstance(prof, dict):
+                continue
+            built: dict[str, Binding] = {}
+            for ik, bd in prof.items():
+                b = Binding.from_dict(bd) if isinstance(bd, dict) else None
+                if b is not None:
+                    built[ik] = b
+            out._profiles[dk] = built
+        return out
 
 
 def key_label(code: int | None) -> str:
