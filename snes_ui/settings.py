@@ -6,8 +6,6 @@ modo de visualizacion del escenario, pestaña activa del panel y geometria.
 """
 from __future__ import annotations
 
-import json
-
 from PySide6.QtCore import QSettings, QByteArray
 
 ORG = "SNESEmulatorDemo"
@@ -16,7 +14,12 @@ APP = "SNESEmulator"
 
 class AppSettings:
     def __init__(self) -> None:
-        self._s = QSettings(ORG, APP)
+        # Se usa defaultFormat() (NativeFormat en producción) para que las
+        # pruebas puedan redirigir QSettings a un directorio temporal vía
+        # setDefaultFormat/setPath sin alterar el comportamiento real.
+        self._s = QSettings(
+            QSettings.defaultFormat(), QSettings.Scope.UserScope, ORG, APP
+        )
 
     # -- geometria / estado de ventana --------------------------------------
     def save_geometry(self, geometry: QByteArray, state: QByteArray) -> None:
@@ -58,14 +61,9 @@ class AppSettings:
         self._s.setValue("input/device", name)
 
     # -- asignaciones --------------------------------------------------------
-    def mappings(self) -> dict[str, int] | None:
+    def profiles_json(self) -> str | None:
         raw = self._s.value("input/mappings")
-        if not raw:
-            return None
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return None
+        return raw if isinstance(raw, str) else None
 
-    def set_mappings(self, mappings: dict[str, int]) -> None:
-        self._s.setValue("input/mappings", json.dumps(mappings))
+    def set_profiles_json(self, raw: str) -> None:
+        self._s.setValue("input/mappings", raw)

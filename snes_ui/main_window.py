@@ -28,7 +28,13 @@ from PySide6.QtWidgets import (
 
 from .core.adapter import create_core
 from .core.session import SessionController
-from .services.input_service import InputService, MappingModel
+from .services.input_service import (
+    InputService,
+    MappingProfiles,
+    KEYBOARD_KEY,
+    key_binding,
+    SNES_INPUTS,
+)
 from .services.save_service import SaveService
 from .settings import AppSettings
 from .state import ConnectionState, ScaleMode, SessionState
@@ -62,19 +68,17 @@ class MainWindow(QMainWindow):
         self._session = SessionController(self._core, self)
         self._input = InputService(self)
         self._saves = SaveService()
-        self._mapping = MappingModel.defaults()
-        saved_maps = self._settings.mappings()
-        if saved_maps:
-            # Solo se aceptan codigos de tecla (int); se descartan asignaciones
-            # de un formato anterior (cadenas) para no romper la resolucion.
-            self._mapping.bindings.update(
-                {k: v for k, v in saved_maps.items() if isinstance(v, int)}
-            )
+        # Perfiles de asignacion por dispositivo (migra el formato anterior).
+        self._profiles = MappingProfiles.from_json(self._settings.profiles_json())
+        self._profiles.ensure(KEYBOARD_KEY, gamepad=False)
+        self._active_device_key = KEYBOARD_KEY
+        # Conjuntos de entradas presionadas por origen (OR-combine en el juego).
+        self._kbd_pressed: set[str] = set()
+        self._pad_pressed: set[str] = set()
 
         self._theme_pref = self._settings.theme_preference()
         self._theme = self._resolve_theme()
         self._scale_mode = ScaleMode(self._settings.scale_mode())
-        self._pressed_inputs: set[str] = set()
 
         self._build_ui()
         self._build_menus()
@@ -117,7 +121,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self._main_area, stretch=1)
 
         # Panel de control
-        self._panel = ControlPanel(self._input, self._mapping, palette_for(self._theme))
+        self._panel = ControlPanel(self._input, self._profiles, KEYBOARD_KEY, palette_for(self._theme))
         body.addWidget(self._panel)
 
         # Overlay de pantalla completa y toast (hijos del area principal)
@@ -275,6 +279,14 @@ class MainWindow(QMainWindow):
     def _on_frame_ready(self) -> None:
         self._stage.update_frame(self._core.get_frame())
 
+    # -- enrutamiento de entrada (OR-combine teclado + mando) ----------------
+    def _recompute_inputs(self) -> None:
+        """Combina (unión) teclado y mando y alimenta el núcleo + diagrama."""
+        union = self._kbd_pressed | self._pad_pressed
+        self._panel.set_live_pressed(union)
+        for spec in SNES_INPUTS:
+            self._core.set_input(spec.retro_id, spec.key in union)
+
     # -- acciones (barra y overlay) -----------------------------------------
     def _on_action(self, key: str) -> None:
         {
@@ -358,7 +370,9 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if res == QMessageBox.StandardButton.Yes:
-            self._mapping.reset()
+            self._profiles.reset(
+                self._active_device_key, gamepad=(self._active_device_key != KEYBOARD_KEY)
+            )
             self._panel.refresh_assignments_from_model()
             self._toast.show_message("Configuración restablecida", "info")
 
@@ -410,33 +424,27 @@ class MainWindow(QMainWindow):
                 self._toggle_fullscreen()
                 return True
             return False
-        # Captura de asignacion de un boton de mapeo: se guarda el codigo de
-        # tecla pulsado, que el modelo usara tanto para mostrar como para jugar.
+        # Captura de asignacion: la tecla pulsada se guarda como Binding de
+        # teclado en el perfil del teclado.
         if self._panel.is_listening:
-            self._panel.assign_physical(key)
+            self._panel.assign_captured(key_binding(key))
             return True
-        # Entrada de juego: alimenta el nucleo (modelo pull) y el diagrama vivo.
-        # Se resuelve contra el mapeo activo, de modo que reasignar surte efecto.
+        # Entrada de juego: resuelve la tecla contra el perfil del teclado y
+        # recompone la union teclado+mando.
         if not event.isAutoRepeat():
-            input_key = self._mapping.input_for_code(key)
+            input_key = self._profiles.input_for_key(KEYBOARD_KEY, key)
             if input_key:
-                self._pressed_inputs.add(input_key)
-                self._panel.set_live_pressed(self._pressed_inputs)
-                retro_id = self._input.retro_id_for(input_key)
-                if retro_id is not None:
-                    self._core.set_input(retro_id, True)
+                self._kbd_pressed.add(input_key)
+                self._recompute_inputs()
         return False
 
     def _handle_key_release(self, event) -> None:
         if event.isAutoRepeat():
             return
-        input_key = self._mapping.input_for_code(event.key())
+        input_key = self._profiles.input_for_key(KEYBOARD_KEY, event.key())
         if input_key:
-            self._pressed_inputs.discard(input_key)
-            self._panel.set_live_pressed(self._pressed_inputs)
-            retro_id = self._input.retro_id_for(input_key)
-            if retro_id is not None:
-                self._core.set_input(retro_id, False)
+            self._kbd_pressed.discard(input_key)
+            self._recompute_inputs()
 
     # -- persistencia / geometria -------------------------------------------
     def _restore_geometry(self) -> None:
@@ -448,7 +456,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._settings.save_geometry(self.saveGeometry(), self.saveState())
-        self._settings.set_mappings(self._mapping.bindings)
+        self._settings.set_profiles_json(self._profiles.to_json())
         self._settings.set_device(self._input.current_device)
         self._settings.set_theme_preference(self._theme_pref)
         self._settings.set_scale_mode(self._scale_mode.value)

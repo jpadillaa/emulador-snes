@@ -8,7 +8,7 @@ real sustituiria la enumeracion y la captura sin cambiar la UI.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QKeySequence
@@ -200,49 +200,6 @@ class MappingProfiles:
                     built[ik] = b
             out._profiles[dk] = built
         return out
-
-
-def key_label(code: int | None) -> str:
-    """Etiqueta legible para mostrar un codigo de tecla Qt en el panel."""
-    if not code:
-        return "Sin asignar"
-    name = QKeySequence(code).toString()
-    return f"Tecla: {name}" if name else "Sin asignar"
-
-
-@dataclass
-class MappingModel:
-    """Mapa logico SNES -> codigo de tecla fisica. Restaurable y persistible.
-
-    Es la unica fuente de verdad de las asignaciones: el panel muestra la
-    etiqueta derivada del codigo y la ventana resuelve las pulsaciones de
-    juego contra este modelo, de modo que reasignar una tecla surte efecto
-    inmediato en la emulacion.
-    """
-    bindings: dict[str, int] = field(default_factory=dict)
-
-    @classmethod
-    def defaults(cls) -> "MappingModel":
-        return cls(dict(DEFAULT_KEYBOARD))
-
-    def assign(self, input_key: str, code: int) -> None:
-        self.bindings[input_key] = code
-
-    def reset(self) -> None:
-        self.bindings = dict(DEFAULT_KEYBOARD)
-
-    def code_for(self, input_key: str) -> int | None:
-        return self.bindings.get(input_key)
-
-    def label_for(self, input_key: str) -> str:
-        return key_label(self.bindings.get(input_key))
-
-    def input_for_code(self, code: int) -> str | None:
-        """Entrada SNES asignada a un codigo de tecla fisica (busqueda inversa)."""
-        for input_key, bound in self.bindings.items():
-            if bound == code:
-                return input_key
-        return None
 
 
 class InputService(QObject):
