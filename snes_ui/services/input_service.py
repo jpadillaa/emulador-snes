@@ -63,6 +63,48 @@ DEFAULT_KEYBOARD: dict[str, int] = {
 }
 
 
+# Direcciones de hat empaquetadas (x,y in {-1,0,1}) -> 0..8.
+def pack_hat(x: int, y: int) -> int:
+    return (x + 1) * 3 + (y + 1)
+
+
+_HAT_ARROWS = {5: "↑", 3: "↓", 1: "←", 7: "→", 8: "↗", 2: "↘", 0: "↙", 6: "↖"}
+
+
+@dataclass(frozen=True)
+class Binding:
+    """Asignacion fisica: tecla o entrada de mando."""
+    kind: str          # "key" | "button" | "hat" | "axis"
+    code: int
+    value: int = 0     # hat: direccion empaquetada; axis: signo (+1/-1)
+
+    def label(self) -> str:
+        if self.kind == "key":
+            name = QKeySequence(self.code).toString()
+            return f"Tecla: {name}" if name else "Sin asignar"
+        if self.kind == "button":
+            return f"Botón {self.code}"
+        if self.kind == "hat":
+            return f"D-Pad {_HAT_ARROWS.get(self.value, '·')}"
+        if self.kind == "axis":
+            return f"Eje {self.code} {'+' if self.value >= 0 else '−'}"
+        return "Sin asignar"
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "code": self.code, "value": self.value}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Binding | None":
+        try:
+            return cls(str(d["kind"]), int(d["code"]), int(d.get("value", 0)))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+def key_binding(code: int) -> Binding:
+    return Binding("key", code)
+
+
 def key_label(code: int | None) -> str:
     """Etiqueta legible para mostrar un codigo de tecla Qt en el panel."""
     if not code:
