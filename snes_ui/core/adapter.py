@@ -30,6 +30,7 @@ from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QFont
 # Resolucion nativa de referencia del SNES (relacion 4:3 a efectos de UI).
 NATIVE_WIDTH = 256
 NATIVE_HEIGHT = 224
+RETRO_MEMORY_SAVE_RAM = 0  # id de RETRO_MEMORY_* para la RAM de batería
 
 
 @dataclass(frozen=True)
@@ -303,6 +304,10 @@ class LibretroCore(EmulatorCore):
         self._lib.retro_serialize.restype = ctypes.c_bool
         self._lib.retro_unserialize.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
         self._lib.retro_unserialize.restype = ctypes.c_bool
+        self._lib.retro_get_memory_data.argtypes = [ctypes.c_uint]
+        self._lib.retro_get_memory_data.restype = ctypes.c_void_p
+        self._lib.retro_get_memory_size.argtypes = [ctypes.c_uint]
+        self._lib.retro_get_memory_size.restype = ctypes.c_size_t
 
     @property
     def title(self) -> str:
@@ -434,6 +439,33 @@ class LibretroCore(EmulatorCore):
         size = len(blob)
         buf = (ctypes.c_ubyte * size).from_buffer_copy(blob)
         return bool(self._lib.retro_unserialize(ctypes.cast(buf, ctypes.c_void_p), size))
+
+    def get_sram(self) -> bytes:
+        if not self._game_loaded:
+            return b""
+        size = int(self._lib.retro_get_memory_size(RETRO_MEMORY_SAVE_RAM))
+        if size <= 0:
+            return b""
+        ptr = self._lib.retro_get_memory_data(RETRO_MEMORY_SAVE_RAM)
+        if not ptr:
+            return b""
+        return ctypes.string_at(ptr, size)
+
+    def load_sram(self, blob: bytes) -> None:
+        if not blob or not self._game_loaded:
+            return
+        size = int(self._lib.retro_get_memory_size(RETRO_MEMORY_SAVE_RAM))
+        ptr = self._lib.retro_get_memory_data(RETRO_MEMORY_SAVE_RAM)
+        if size <= 0 or not ptr:
+            return
+        n = min(len(blob), size)
+        if n != size:
+            print(
+                f"[adapter] tamaño de SRAM no coincide: archivo={len(blob)} "
+                f"core={size}; se copian {n} bytes.",
+                file=sys.stderr,
+            )
+        ctypes.memmove(ptr, blob, n)
 
     # -- control de audio ----------------------------------------------------
     def start_audio(self) -> None:
