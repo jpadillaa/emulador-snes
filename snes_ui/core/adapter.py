@@ -94,6 +94,14 @@ class EmulatorCore(ABC):
     def stop_audio(self) -> None:
         """Detiene la reproduccion y libera el dispositivo de audio."""
 
+    # -- SRAM (RAM de batería del cartucho); no-op por defecto --------------
+    def get_sram(self) -> bytes:
+        """Copia del SRAM del cartucho, o ``b''`` si no hay/aplica."""
+        return b""
+
+    def load_sram(self, blob: bytes) -> None:
+        """Vuelca un SRAM previamente guardado en el buffer del cartucho."""
+
 
 class MockEmulatorCore(EmulatorCore):
     """Nucleo simulado: produce un patron animado en lugar de emular.
