@@ -43,9 +43,10 @@ from .state_card import StateCard
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
-# Geometría de la tarjeta (la celda del grid es mayor; el delegate deja aire).
-_CELL = QSize(184, 176)
-_CARD_INSET = 8
+# Geometría de la tarjeta (la celda del grid es mayor; el delegate deja aire
+# para la sombra de elevación al hover).
+_CELL = QSize(184, 178)
+_CARD_INSET = 10
 _CARD_RADIUS = 18.0
 _NAME_BAND = 52  # alto reservado para el nombre en la base
 
@@ -109,6 +110,17 @@ class GameCardDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
 
+        # Elevación al hover: sombra suave (capas translúcidas crecientes que
+        # imitan un desenfoque) bajo la tarjeta.
+        if hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 9))
+            for spread in range(6, 0, -1):
+                sh = card.translated(0, 3).adjusted(-spread, -spread, spread, spread)
+                painter.drawRoundedRect(
+                    sh, _CARD_RADIUS + spread, _CARD_RADIUS + spread
+                )
+
         path = QPainterPath()
         path.addRoundedRect(card, _CARD_RADIUS, _CARD_RADIUS)
 
@@ -119,6 +131,12 @@ class GameCardDelegate(QStyledItemDelegate):
         painter.fillPath(path, grad)
 
         painter.setClipPath(path)
+
+        # Brillo superior sutil para dar volumen (sin lavar el monograma).
+        sheen = QLinearGradient(card.topLeft(), card.bottomLeft())
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 30))
+        sheen.setColorAt(0.45, QColor(255, 255, 255, 0))
+        painter.fillRect(card, sheen)
 
         # Emblema: inicial gigante y fantasmal como mini-carátula. Se centra por
         # el contorno real del glifo (no por la caja de texto, que incluye
@@ -191,12 +209,16 @@ class GameCardDelegate(QStyledItemDelegate):
 
         painter.setClipping(False)
 
-        # Anillo de selección con el acento del tema.
+        # Canto de la tarjeta: hairline oscura del propio color para definir el
+        # borde, o anillo de acento si está seleccionada.
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         if selected:
-            pen = QPen(self.accent, 2.5)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(card, _CARD_RADIUS, _CARD_RADIUS)
+            painter.setPen(QPen(self.accent, 2.5))
+        else:
+            edge = QColor(skin.mono)
+            edge.setAlpha(60)
+            painter.setPen(QPen(edge, 1.0))
+        painter.drawRoundedRect(card, _CARD_RADIUS, _CARD_RADIUS)
 
         painter.restore()
 
