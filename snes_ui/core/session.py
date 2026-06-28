@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .adapter import EmulatorCore
+from ..services.sram_service import SramStore
 from ..state import SessionState
 
 
@@ -20,9 +21,15 @@ class SessionController(QObject):
     rom_changed = Signal(str)                      # nombre legible de la ROM
     dirty_changed = Signal(bool)                   # hay progreso sin guardar
 
-    def __init__(self, core: EmulatorCore, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        core: EmulatorCore,
+        parent: QObject | None = None,
+        sram_store: SramStore | None = None,
+    ) -> None:
         super().__init__(parent)
         self._core = core
+        self._sram = sram_store if sram_store is not None else SramStore()
         self._state = SessionState.EMPTY
         self._rom_path: str | None = None
         self._rom_name: str = ""
@@ -66,6 +73,9 @@ class SessionController(QObject):
     def begin_loading(self, path: str) -> None:
         """Entra al estado cargando mostrando el nombre del archivo."""
         import os
+        # Vuelca el SRAM del juego anterior (si lo hay) antes de cambiar de ROM:
+        # al cargar otro juego el core descarga el actual y se perdería.
+        self._flush_sram()
         self._rom_path = path
         self._rom_name = os.path.basename(path)
         self.rom_changed.emit(self._rom_name)
@@ -83,6 +93,10 @@ class SessionController(QObject):
                 "una imagen SNES válida (.sfc o .smc) y no esté dañado."
             )
             return False
+        # Carga el SRAM guardado del cartucho (si existe) en el buffer del core.
+        saved = self._sram.read(self._rom_name)
+        if saved:
+            self._core.load_sram(saved)
         self._set_dirty(False)
         self._set_state(SessionState.RUNNING)
         fps = self._core.av_info().fps or 60.0
@@ -115,9 +129,19 @@ class SessionController(QObject):
         elif self._state == SessionState.PAUSED:
             self.resume()
 
+    def _flush_sram(self) -> None:
+        """Vuelca el SRAM del juego actual al disco (si hay ROM)."""
+        if self._rom_name:
+            self._sram.write(self._rom_name, self._core.get_sram())
+
+    def flush_sram(self) -> None:
+        """Punto de volcado público (lo usa el cierre de la app)."""
+        self._flush_sram()
+
     def quit_session(self) -> None:
         """Cierra la sesion activa y vuelve al estado vacio."""
         self._timer.stop()
+        self._flush_sram()
         self._core.unload()
         self._rom_path = None
         self._rom_name = ""
