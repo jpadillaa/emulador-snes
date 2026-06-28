@@ -361,4 +361,29 @@ def build_stylesheet(name: ThemeName) -> str:
         border: 1px solid {p.border_subtle};
         border-radius: {RADIUS_GROUP}px;
     }}
+
+    /* --- Biblioteca de ROMs (cuadrícula en el escenario) --- */
+    QListWidget#Biblioteca {{
+        background: transparent;
+        border: none;
+        outline: none;
+    }}
+    QListWidget#Biblioteca::item {{
+        background-color: {p.elevated};
+        border: 1px solid {p.border_subtle};
+        border-radius: {RADIUS_GROUP}px;
+        margin: 6px;
+        padding: 10px 6px;
+        color: {p.text_primary};
+        font-size: 13px;
+        font-weight: 600;
+    }}
+    QListWidget#Biblioteca::item:hover {{
+        background-color: {p.control_hover};
+    }}
+    QListWidget#Biblioteca::item:selected {{
+        background-color: {accent_tint};
+        border: 1px solid {p.accent};
+        color: {p.text_primary};
+    }}
     """
