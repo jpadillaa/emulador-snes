@@ -73,8 +73,11 @@ class LibraryView(QWidget):
         self._list.setWrapping(True)
         self._list.setUniformItemSizes(True)
         self._list.setWordWrap(True)
+        # Sin elidir: que el nombre se envuelva en varias líneas en vez de
+        # cortarse ("Chrono Trigger" → dos líneas, no "Chron...").
+        self._list.setTextElideMode(Qt.TextElideMode.ElideNone)
         self._list.setSpacing(0)
-        self._list.setGridSize(QSize(168, 84))
+        self._list.setGridSize(QSize(176, 96))
         self._list.setIconSize(QSize(0, 0))
         self._list.itemActivated.connect(self._on_item_activated)
         self._stack.addWidget(self._list)            # índice 0
@@ -102,6 +105,9 @@ class LibraryView(QWidget):
             item.setData(_PATH_ROLE, str(g.path))
             item.setToolTip(f"{g.display_name}\n{g.folder} · {g.path}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # sizeHint explícito = tamaño de tarjeta, para que el texto se
+            # envuelva en todo el ancho (si no, el ítem se encoge al texto).
+            item.setSizeHint(QSize(164, 84))
             self._list.addItem(item)
         self._apply_filter(self._search.text())
         self._stack.setCurrentWidget(
