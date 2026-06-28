@@ -16,8 +16,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..services.library_service import LibraryService
 from ..state import ScaleMode, SessionState
 from ..theme import STAGE_PADDING, Palette
+from .library_view import LibraryView
 from .state_card import StateCard
 from .video_surface import VideoSurface
 
@@ -61,10 +63,13 @@ class GameStage(QFrame):
     retry_requested = Signal()      # reintentar desde error
     close_error_requested = Signal()  # cerrar error -> estado vacio
     resume_requested = Signal()     # reanudar desde pausa
+    game_selected = Signal(str)        # ruta de ROM elegida en la biblioteca
+    library_manage_folders = Signal()  # solicitud de gestionar carpetas
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, library_service: LibraryService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("EscenarioJuego")
+        self._service = library_service
 
         root = QVBoxLayout(self)
         root.setContentsMargins(STAGE_PADDING, STAGE_PADDING, STAGE_PADDING, STAGE_PADDING)
@@ -72,14 +77,13 @@ class GameStage(QFrame):
         self._stack = QStackedWidget()
         root.addWidget(self._stack)
 
-        # 0 - Vacio
-        self._empty = StateCard(
-            "controller",
-            "Ningún juego cargado",
-            "Carga una ROM de SNES para comenzar a jugar.",
-        )
-        self._empty.add_action("Cargar juego", self.request_load.emit, primary=True)
-        self._stack.addWidget(self._empty)
+        # 0 - Vacio: biblioteca de ROMs
+        self._library = LibraryView()
+        self._library.game_selected.connect(self.game_selected.emit)
+        self._library.manage_folders_requested.connect(self.library_manage_folders.emit)
+        self._library.open_file_requested.connect(self.request_load.emit)
+        self._library.rescan_requested.connect(self.refresh_library)
+        self._stack.addWidget(self._library)
 
         # 1 - Cargando
         self._loading = StateCard("hourglass", "Cargando", "", indeterminate=True)
@@ -119,9 +123,12 @@ class GameStage(QFrame):
 
     def apply_icon_color(self, palette: Palette) -> None:
         """Re-tiñe los iconos de las tarjetas al tema (error en color de error)."""
-        for card in (self._empty, self._loading, self._pause.card):
+        for card in (self._loading, self._pause.card):
             card.apply_icon_color(palette.text_secondary)
         self._error.apply_icon_color(palette.error)
+
+    def refresh_library(self) -> None:
+        self._library.set_games(self._service.scan())
 
     def show_state(self, state: SessionState) -> None:
         if state == SessionState.PAUSED:
