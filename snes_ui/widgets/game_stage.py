@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..state import ScaleMode, SessionState
-from ..theme import STAGE_PADDING
+from ..theme import STAGE_PADDING, Palette
 from .state_card import StateCard
 from .video_surface import VideoSurface
 
@@ -32,9 +32,13 @@ class _PauseView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._card = StateCard(
-            "⏸", "PAUSA", "Pulsa Reanudar, usa el atajo o haz clic aquí para continuar."
+            "pause", "Pausa", "Pulsa Reanudar, usa el atajo o haz clic aquí para continuar."
         )
         layout.addWidget(self._card)
+
+    @property
+    def card(self) -> StateCard:
+        return self._card
 
     def set_frame(self, image: QImage | None) -> None:
         self._frame = image.copy() if image is not None else None
@@ -70,15 +74,15 @@ class GameStage(QFrame):
 
         # 0 - Vacio
         self._empty = StateCard(
-            "🎮",
-            "NINGÚN JUEGO CARGADO",
+            "controller",
+            "Ningún juego cargado",
             "Carga una ROM de SNES para comenzar a jugar.",
         )
         self._empty.add_action("Cargar juego", self.request_load.emit, primary=True)
         self._stack.addWidget(self._empty)
 
         # 1 - Cargando
-        self._loading = StateCard("⏳", "CARGANDO", "", indeterminate=True)
+        self._loading = StateCard("hourglass", "Cargando", "", indeterminate=True)
         self._stack.addWidget(self._loading)
 
         # 2 - Ejecucion
@@ -95,7 +99,7 @@ class GameStage(QFrame):
         self._stack.addWidget(self._pause)
 
         # 4 - Error
-        self._error = StateCard("⚠️", "ERROR", "")
+        self._error = StateCard("warning", "Error", "")
         self._error.add_action("Reintentar", self.retry_requested.emit, primary=True)
         self._error.add_action("Cerrar", self.close_error_requested.emit)
         self._stack.addWidget(self._error)
@@ -112,6 +116,12 @@ class GameStage(QFrame):
     @property
     def video(self) -> VideoSurface:
         return self._video
+
+    def apply_icon_color(self, palette: Palette) -> None:
+        """Re-tiñe los iconos de las tarjetas al tema (error en color de error)."""
+        for card in (self._empty, self._loading, self._pause.card):
+            card.apply_icon_color(palette.text_secondary)
+        self._error.apply_icon_color(palette.error)
 
     def show_state(self, state: SessionState) -> None:
         if state == SessionState.PAUSED:

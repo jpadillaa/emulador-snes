@@ -35,6 +35,9 @@ class OverlayActionBar(QWidget):
     def set_session_active(self, active: bool) -> None:
         self._bar.set_session_active(active)
 
+    def set_icon_color(self, color: str) -> None:
+        self._bar.set_icon_color(color)
+
     def reveal(self) -> None:
         self._reposition()
         self.setVisible(True)

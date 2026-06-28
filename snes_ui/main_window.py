@@ -10,12 +10,13 @@ import os
 import sys
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QIcon, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -130,9 +131,28 @@ class MainWindow(QMainWindow):
         self._panel = ControlPanel(self._input, self._profiles, KEYBOARD_KEY, palette_for(self._theme))
         body.addWidget(self._panel)
 
-        # Overlay de pantalla completa y toast (hijos del area principal)
+        # Sombra de elevación suave en las superficies de material (no en el
+        # escenario: lleva vídeo a 60 fps y un efecto gráfico lo re-renderizaría).
+        self._add_elevation(self._panel)
+        self._add_elevation(self._action_bar)
+
+        # Overlay de pantalla completa y toast (hijos del area principal).
         self._overlay = OverlayActionBar(self._main_area)
         self._toast = Toast(self._main_area)
+
+    def _add_elevation(self, widget: QWidget) -> None:
+        """Aplica una sombra sutil tipo macOS para despegar la superficie del fondo.
+
+        El radio de desenfoque se mantiene por debajo del margen disponible
+        alrededor de la superficie (MARGIN_WINDOW / STACK_GAP ≈ 16-20 px); si el
+        blur excede ese margen, QGraphicsDropShadowEffect recorta la sombra
+        contra el borde de la ventana y deja cantos duros y esquinas extrañas."""
+        shadow = QGraphicsDropShadowEffect(widget)
+        shadow.setBlurRadius(16)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 55))
+        widget.setGraphicsEffect(shadow)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -261,7 +281,14 @@ class MainWindow(QMainWindow):
         # evitar el alias inexistente "Sans Serif" que usan algunos backends.
         app.setFont(QFont(system_font_family()))
         app.setStyleSheet(build_stylesheet(self._theme))
-        self._panel.set_palette(palette_for(self._theme))
+        pal = palette_for(self._theme)
+        self._panel.set_palette(pal)
+        # Re-teñir los iconos de línea monocromáticos al color del tema (los
+        # pixmaps no se adaptan solos al cambiar claro/oscuro).
+        self._action_bar.set_icon_color(pal.text_primary)
+        self._overlay.set_icon_color(pal.text_primary)
+        self._stage.apply_icon_color(pal)
+        self._toast.set_palette(pal)
 
     def _set_theme_pref(self, value: str) -> None:
         self._theme_pref = value

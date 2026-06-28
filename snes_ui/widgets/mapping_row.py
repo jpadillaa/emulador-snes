@@ -25,8 +25,8 @@ class MappingRow(QFrame):
         self._listening = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 10, 12, 10)
+        layout.setSpacing(10)
 
         icon_lbl = QLabel(icon)
         icon_lbl.setObjectName("IconoEntrada")

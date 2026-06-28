@@ -19,31 +19,34 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import ACTION_BAR_HEIGHT
-from .icons import glyph_icon
+from .icons import line_icon
+
+# Color de respaldo hasta que MainWindow aplica el tema y re-tiñe los iconos.
+_DEFAULT_ICON_COLOR = "#86868B"
 
 
 @dataclass(frozen=True)
 class ActionSpec:
     key: str
-    glyph: str
+    icon: str                    # nombre de icono en widgets.icons
     label: str                   # etiqueta unica, corta y puntual
     needs_session: bool          # se deshabilita en estado vacio
 
 
 ACTIONS = [
-    ActionSpec("load_game", "📂", "Cargar juego", False),
-    ActionSpec("save_state", "💾", "Guardar partida", True),
-    ActionSpec("load_state", "📥", "Cargar partida", True),
-    ActionSpec("quit_game", "🚪", "Salir", True),
-    ActionSpec("fullscreen", "⛶", "Pantalla completa", False),
+    ActionSpec("load_game", "folder", "Cargar juego", False),
+    ActionSpec("save_state", "save", "Guardar partida", True),
+    ActionSpec("load_state", "restore", "Cargar partida", True),
+    ActionSpec("quit_game", "exit", "Salir", True),
+    ActionSpec("fullscreen", "fullscreen", "Pantalla completa", False),
 ]
 
 
-def _make_button(spec: ActionSpec) -> QToolButton:
+def _make_button(spec: ActionSpec, color: str) -> QToolButton:
     btn = QToolButton()
     btn.setObjectName("AccionBarra")
     btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-    btn.setIcon(glyph_icon(spec.glyph, 24))
+    btn.setIcon(line_icon(spec.icon, 24, color))
     btn.setText(spec.label)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setAutoRaise(True)
@@ -65,15 +68,22 @@ class ActionBar(QFrame):
         layout.setSpacing(12)
         layout.addStretch()
 
+        self._icon_color = _DEFAULT_ICON_COLOR
         self._buttons: dict[str, QToolButton] = {}
         for i, spec in enumerate(ACTIONS):
-            btn = _make_button(spec)
+            btn = _make_button(spec, self._icon_color)
             btn.clicked.connect(lambda _=False, k=spec.key: self.triggered.emit(k))
             self._buttons[spec.key] = btn
             layout.addWidget(btn)
             if i < len(ACTIONS) - 1:
                 layout.addWidget(self._separator())
         layout.addStretch()
+
+    def set_icon_color(self, color: str) -> None:
+        """Re-tiñe los iconos al color del tema vigente."""
+        self._icon_color = color
+        for spec in ACTIONS:
+            self._buttons[spec.key].setIcon(line_icon(spec.icon, 24, color))
 
     def _separator(self) -> QFrame:
         sep = QFrame()

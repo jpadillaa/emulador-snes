@@ -8,6 +8,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel, QWidget
 
+from ..theme import LIGHT, Palette
+
 
 class Toast(QLabel):
     def __init__(self, parent: QWidget) -> None:
@@ -16,18 +18,23 @@ class Toast(QLabel):
         self.setWordWrap(True)
         self.setVisible(False)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._palette = LIGHT
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
 
+    def set_palette(self, palette: Palette) -> None:
+        self._palette = palette
+
     def show_message(self, text: str, kind: str = "ok", msec: int = 2000) -> None:
+        p = self._palette
         bg = {
-            "ok": "#34C759",
-            "error": "#FF3B30",
-            "info": "#007AFF",
-        }.get(kind, "#34C759")
+            "ok": p.connected,
+            "error": p.error,
+            "info": p.accent,
+        }.get(kind, p.connected)
         self.setStyleSheet(
-            f"background-color: {bg}; color: white; border-radius: 8px;"
+            f"background-color: {bg}; color: {p.on_accent}; border-radius: 8px;"
             "padding: 10px 18px; font-size: 13px; font-weight: 600;"
         )
         self.setText(text)

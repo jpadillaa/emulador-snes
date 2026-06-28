@@ -9,7 +9,9 @@ def test_pack_hat_directions():
 
 
 def test_label_per_kind(qapp):
-    assert key_binding(0x58).label() == "Tecla: X"
+    assert key_binding(0x58).label() == "X"                    # letra: nombre tal cual
+    assert key_binding(0x01000013).label() == "↑"             # flecha: glifo macOS
+    assert key_binding(0x01000004).label() == "↩"             # Return: glifo
     assert Binding("button", 0).label() == "Botón 0"
     assert Binding("hat", 0, pack_hat(0, 1)).label() == "D-Pad ↑"
     assert Binding("axis", 1, 1).label() == "Eje 1 +"

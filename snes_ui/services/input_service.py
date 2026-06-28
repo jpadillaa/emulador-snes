@@ -71,6 +71,16 @@ def pack_hat(x: int, y: int) -> int:
 
 _HAT_ARROWS = {5: "↑", 3: "↓", 1: "←", 7: "→", 8: "↗", 2: "↘", 0: "↙", 6: "↖"}
 
+# Glifos al estilo de los atajos de macOS para teclas comunes, de modo que la
+# cápsula de asignación muestre un símbolo compacto (↑, ↩, ⇧) en vez del nombre
+# largo. Las teclas no listadas (letras, F1…) usan su propio nombre.
+_KEY_GLYPHS = {
+    "Up": "↑", "Down": "↓", "Left": "←", "Right": "→",
+    "Return": "↩", "Enter": "↩", "Shift": "⇧", "Ctrl": "⌃",
+    "Alt": "⌥", "Meta": "⌘", "Tab": "⇥", "Backspace": "⌫",
+    "Space": "Espacio", "Esc": "Esc",
+}
+
 
 @dataclass(frozen=True)
 class Binding:
@@ -82,7 +92,9 @@ class Binding:
     def label(self) -> str:
         if self.kind == "key":
             name = QKeySequence(self.code).toString()
-            return f"Tecla: {name}" if name else "Sin asignar"
+            if not name:
+                return "Sin asignar"
+            return _KEY_GLYPHS.get(name, name)
         if self.kind == "button":
             return f"Botón {self.code}"
         if self.kind == "hat":

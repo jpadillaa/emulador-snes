@@ -19,6 +19,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .icons import line_pixmap
+
+ICON_SIZE = 52
+_DEFAULT_ICON_COLOR = "#86868B"
+
 
 class StateCard(QWidget):
     def __init__(
@@ -28,6 +33,7 @@ class StateCard(QWidget):
         description: str = "",
         pill: str | None = None,
         indeterminate: bool = False,
+        icon_color: str = _DEFAULT_ICON_COLOR,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -40,9 +46,12 @@ class StateCard(QWidget):
         card.setSpacing(12)
         card.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._icon = QLabel(icon)
+        self._icon_name = icon
+        self._icon_color = icon_color
+        self._icon = QLabel()
         self._icon.setObjectName("IconoTarjeta")
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setPixmap(line_pixmap(icon, ICON_SIZE, icon_color, stroke=1.6))
         card.addWidget(self._icon)
 
         self._title = QLabel(title)
@@ -92,6 +101,11 @@ class StateCard(QWidget):
     def set_description(self, text: str) -> None:
         self._desc.setText(text)
         self._desc.setVisible(bool(text))
+
+    def apply_icon_color(self, color: str) -> None:
+        """Re-tiñe el icono al color del tema vigente."""
+        self._icon_color = color
+        self._icon.setPixmap(line_pixmap(self._icon_name, ICON_SIZE, color, stroke=1.6))
 
     def add_action(self, text: str, on_click: Callable[[], None], primary: bool = False) -> QPushButton:
         btn = QPushButton(text)

@@ -31,7 +31,7 @@ from ..theme import (
     SECTION_GAP,
 )
 from .controller_diagram import ControllerDiagram
-from .icons import glyph_icon
+from .icons import line_icon
 from .mapping_row import MappingRow
 from .segmented_control import SegmentedControl
 
@@ -63,6 +63,8 @@ class ControlPanel(QFrame):
         self._input = input_service
         self._profiles = profiles
         self._device_key = device_key
+        self._palette = palette
+        self._conn_state = input_service.connection_state
         self._rows: dict[str, MappingRow] = {}
         self._listening_key: str | None = None
 
@@ -90,6 +92,8 @@ class ControlPanel(QFrame):
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(0, 0, 0, 0)
         self._reset_btn = QPushButton("Restablecer configuración")
+        self._reset_btn.setObjectName("BotonReset")
+        self._reset_btn.setIcon(line_icon("reset", 16, palette.error))
         self._reset_btn.clicked.connect(self.reset_requested.emit)
         self._reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         fl.addWidget(self._reset_btn)
@@ -123,7 +127,7 @@ class ControlPanel(QFrame):
         selector_row.addWidget(self._combo, stretch=1)
         self._refresh_btn = QToolButton()
         self._refresh_btn.setObjectName("BotonRefrescar")
-        self._refresh_btn.setIcon(glyph_icon("⟳", 18))
+        self._refresh_btn.setIcon(line_icon("refresh", 18, palette.text_secondary))
         self._refresh_btn.setToolTip("Re-enumerar dispositivos")
         self._refresh_btn.clicked.connect(self.refresh_requested.emit)
         selector_row.addWidget(self._refresh_btn)
@@ -155,17 +159,26 @@ class ControlPanel(QFrame):
         illo_layout.addWidget(self._illustration)
         al.addWidget(illo_frame)
 
-        rows_wrap = QWidget()
-        rl = QVBoxLayout(rows_wrap)
+        # Lista "inset grouped": un solo contenedor redondeado con las filas
+        # separadas por líneas capilares internas (como Ajustes del Sistema).
+        group = QFrame()
+        group.setObjectName("GrupoMapeo")
+        rl = QVBoxLayout(group)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(8)
-        for spec in SNES_INPUTS:
+        rl.setSpacing(0)
+        last = len(SNES_INPUTS) - 1
+        for i, spec in enumerate(SNES_INPUTS):
             row = MappingRow(spec.key, spec.icon, spec.name,
                              self._profiles.label_for(self._device_key, spec.key))
             row.listen_requested.connect(self._on_listen_requested)
             self._rows[spec.key] = row
             rl.addWidget(row)
-        al.addWidget(rows_wrap)
+            if i != last:
+                sep = QFrame()
+                sep.setObjectName("SeparadorFila")
+                sep.setFixedHeight(1)
+                rl.addWidget(sep)
+        al.addWidget(group)
         layout.addWidget(assign)
         layout.addStretch()
         return view
@@ -219,10 +232,11 @@ class ControlPanel(QFrame):
         self._combo.blockSignals(False)
 
     def update_connection(self, state: ConnectionState) -> None:
+        self._conn_state = state
         colors = {
-            ConnectionState.CONNECTED: "#34C759",
-            ConnectionState.DISCONNECTED: "#8D9199",
-            ConnectionState.RECONNECTING: "#FF9F0A",
+            ConnectionState.CONNECTED: self._palette.connected,
+            ConnectionState.DISCONNECTED: self._palette.disconnected,
+            ConnectionState.RECONNECTING: self._palette.reconnecting,
         }
         self._status_dot.setStyleSheet(f"color: {colors[state]}; font-size: 14px;")
         self._status_label.setText(state.label)
@@ -287,5 +301,10 @@ class ControlPanel(QFrame):
         self._illustration.set_pressed(pressed)
 
     def set_palette(self, palette: Palette) -> None:
+        self._palette = palette
         self._illustration.set_palette(palette)
         self._live_diagram.set_palette(palette)
+        self._refresh_btn.setIcon(line_icon("refresh", 18, palette.text_secondary))
+        self._reset_btn.setIcon(line_icon("reset", 16, palette.error))
+        # Re-aplica el color del indicador de conexión con la nueva paleta.
+        self.update_connection(self._conn_state)
