@@ -403,22 +403,15 @@ def build_stylesheet(name: ThemeName) -> str:
         border: none;
         outline: none;
     }}
+    /* Las tarjetas se pintan por completo en GameCardDelegate; el ítem
+       no debe aportar fondo, borde ni realce de selección propios. */
     QListWidget#Biblioteca::item {{
-        background-color: {p.elevated};
-        border: 1px solid {p.border_subtle};
-        border-radius: {RADIUS_GROUP}px;
-        margin: 6px;
-        padding: 10px 6px;
-        color: {p.text_primary};
-        font-size: 13px;
-        font-weight: 600;
+        background: transparent;
+        border: none;
     }}
-    QListWidget#Biblioteca::item:hover {{
-        background-color: {p.control_hover};
-    }}
+    QListWidget#Biblioteca::item:hover,
     QListWidget#Biblioteca::item:selected {{
-        background-color: {accent_tint};
-        border: 1px solid {p.accent};
-        color: {p.text_primary};
+        background: transparent;
+        border: none;
     }}
     """

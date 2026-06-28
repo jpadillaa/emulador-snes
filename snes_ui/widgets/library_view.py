@@ -1,16 +1,27 @@
 """Vista de biblioteca: cuadrícula de juegos en el escenario vacío.
 
 Cabecera con búsqueda y acciones (re-escanear, gestionar carpetas) sobre un
-``QListWidget`` en modo icono (cuadrícula que ajusta columnas, navegación con
-flechas, doble-clic/Enter para lanzar). Si no hay juegos, muestra una guía con
-las acciones para añadir una carpeta o abrir un archivo suelto.
+``QListWidget`` en modo icono. Cada juego se dibuja como una **tarjeta llena**
+de su color característico (estable por nombre) mediante un ``QStyledItemDelegate``
+a medida: degradado suave del color, un monograma fantasma como mini-carátula y
+el nombre en una banda inferior con texto de contraste automático. Si no hay
+juegos, muestra una guía con las acciones para añadir una carpeta o abrir un
+archivo suelto.
 """
 from __future__ import annotations
 
 import hashlib
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -18,6 +29,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -30,29 +43,162 @@ from .state_card import StateCard
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
+# Geometría de la tarjeta (la celda del grid es mayor; el delegate deja aire).
+_CELL = QSize(184, 176)
+_CARD_INSET = 8
+_CARD_RADIUS = 18.0
+_NAME_BAND = 52  # alto reservado para el nombre en la base
 
-def _game_color(name: str) -> QColor:
-    """Color característico y estable derivado del nombre del juego."""
-    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
-    hue = int(digest[:8], 16) % 360
-    return QColor.fromHsl(hue, 135, 150)
+
+class _GameSkin:
+    """Colores derivados de forma estable del nombre del juego."""
+
+    __slots__ = ("top", "base", "mono", "text", "scrim")
+
+    def __init__(self, name: str) -> None:
+        digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+        hue = int(digest[:8], 16) % 360
+        # Saturación con ligera variación por nombre para que no sean clones.
+        sat = 150 + (int(digest[8:10], 16) % 50)          # 150–199
+        base = QColor.fromHsl(hue, min(sat, 255), 138)
+        self.base = base
+        self.top = QColor.fromHsl(hue, max(sat - 28, 0), 182)   # esquina clara
+        self.mono = QColor.fromHsl(hue, min(sat + 20, 255), 92)  # emblema profundo
+
+        # Texto con contraste perceptual sobre el color base.
+        r, g, b, _ = base.getRgb()
+        luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        if luminance > 150:
+            self.text = QColor.fromHsl(hue, 200, 46)   # tono oscuro de la familia
+            self.scrim = QColor(255, 255, 255, 0)      # no hace falta velo
+        else:
+            self.text = QColor(255, 255, 255)
+            self.scrim = QColor(0, 0, 0, 64)
 
 
-def _color_badge(color: QColor, size: int = 30) -> QPixmap:
-    """Pequeña insignia redondeada del color del juego (mini 'carátula')."""
-    dpr = 2
-    px = size * dpr
-    pm = QPixmap(px, px)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(color)
-    r = px * 0.30
-    p.drawRoundedRect(QRectF(0, 0, px, px), r, r)
-    p.end()
-    pm.setDevicePixelRatio(dpr)
-    return pm
+class GameCardDelegate(QStyledItemDelegate):
+    """Pinta cada juego como una tarjeta de color con nombre armonioso."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.accent = QColor("#007AFF")
+        self._skins: dict[str, _GameSkin] = {}
+
+    def _skin(self, name: str) -> _GameSkin:
+        skin = self._skins.get(name)
+        if skin is None:
+            skin = _GameSkin(name)
+            self._skins[name] = skin
+        return skin
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802 (Qt API)
+        return _CELL
+
+    def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
+        name = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        skin = self._skin(name)
+        state = option.state
+        hovered = bool(state & QStyle.StateFlag.State_MouseOver)
+        selected = bool(state & QStyle.StateFlag.State_Selected)
+
+        card = QRectF(option.rect).adjusted(
+            _CARD_INSET, _CARD_INSET, -_CARD_INSET, -_CARD_INSET
+        )
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+        path = QPainterPath()
+        path.addRoundedRect(card, _CARD_RADIUS, _CARD_RADIUS)
+
+        # Fondo: degradado diagonal del color del juego.
+        grad = QLinearGradient(card.topLeft(), card.bottomRight())
+        grad.setColorAt(0.0, skin.top)
+        grad.setColorAt(1.0, skin.base)
+        painter.fillPath(path, grad)
+
+        painter.setClipPath(path)
+
+        # Emblema: inicial gigante y fantasmal como mini-carátula. Se centra por
+        # el contorno real del glifo (no por la caja de texto, que incluye
+        # ascenso/descenso y márgenes laterales y descentra ópticamente).
+        initial = next((c for c in name if c.isalnum()), "?").upper()
+        mono_font = QFont(painter.font())
+        mono_font.setBold(True)
+        mono_font.setPixelSize(int(card.height() * 0.74))
+        painter.setFont(mono_font)
+        mono = QColor(skin.mono)
+        mono.setAlpha(58)
+        painter.setPen(mono)
+        emblem_zone = QRectF(card.left(), card.top(),
+                             card.width(), card.height() - _NAME_BAND)
+        glyph = QFontMetricsF(mono_font).boundingRect(initial)  # caja ajustada
+        origin = QPointF(
+            emblem_zone.center().x() - glyph.center().x(),
+            emblem_zone.center().y() - glyph.center().y(),
+        )
+        painter.drawText(origin, initial)
+
+        # Velo inferior para legibilidad cuando el texto es blanco.
+        if skin.scrim.alpha() > 0:
+            band = QRectF(card.left(), card.bottom() - _NAME_BAND - 18,
+                          card.width(), _NAME_BAND + 18)
+            veil = QLinearGradient(band.topLeft(), band.bottomLeft())
+            top_c = QColor(skin.scrim)
+            top_c.setAlpha(0)
+            veil.setColorAt(0.0, top_c)
+            veil.setColorAt(1.0, skin.scrim)
+            painter.fillRect(band, veil)
+
+        # Realce al pasar el ratón (sutil aclarado de toda la tarjeta).
+        if hovered and not selected:
+            overlay = QColor(255, 255, 255, 28)
+            painter.fillPath(path, overlay)
+
+        # Nombre: banda inferior, centrado, con auto-ajuste de tamaño.
+        name_rect = QRectF(
+            card.left() + 12,
+            card.bottom() - _NAME_BAND,
+            card.width() - 24,
+            _NAME_BAND - 10,
+        )
+        # Nombres con espacios envuelven por palabra (bonito); un único token
+        # largo ("SuperMarioKart") se parte por carácter como último recurso.
+        wrap = (
+            Qt.TextFlag.TextWordWrap
+            if " " in name.strip()
+            else Qt.TextFlag.TextWrapAnywhere
+        )
+        flags = (
+            Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom
+            | wrap
+        )
+        name_font = QFont(painter.font())
+        name_font.setBold(True)
+        size = 15
+        while size > 10:
+            name_font.setPixelSize(size)
+            painter.setFont(name_font)
+            br = painter.boundingRect(name_rect, flags, name)
+            if br.height() <= name_rect.height() and br.width() <= name_rect.width():
+                break
+            size -= 1
+        painter.setFont(name_font)
+        painter.setPen(skin.text)
+        painter.drawText(name_rect, flags, name)
+
+        painter.setClipping(False)
+
+        # Anillo de selección con el acento del tema.
+        if selected:
+            pen = QPen(self.accent, 2.5)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(card, _CARD_RADIUS, _CARD_RADIUS)
+
+        painter.restore()
 
 
 class LibraryView(QWidget):
@@ -94,6 +240,7 @@ class LibraryView(QWidget):
         # --- Cuerpo: lista o guía vacía ---
         self._stack = QStackedWidget()
 
+        self._delegate = GameCardDelegate(self)
         self._list = QListWidget()
         self._list.setObjectName("Biblioteca")
         self._list.setViewMode(QListWidget.ViewMode.IconMode)
@@ -101,13 +248,10 @@ class LibraryView(QWidget):
         self._list.setMovement(QListWidget.Movement.Static)
         self._list.setWrapping(True)
         self._list.setUniformItemSizes(True)
-        self._list.setWordWrap(True)
-        # Sin elidir: que el nombre se envuelva en varias líneas en vez de
-        # cortarse ("Chrono Trigger" → dos líneas, no "Chron...").
-        self._list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self._list.setMouseTracking(True)
         self._list.setSpacing(0)
-        self._list.setGridSize(QSize(176, 134))
-        self._list.setIconSize(QSize(30, 30))
+        self._list.setGridSize(_CELL)
+        self._list.setItemDelegate(self._delegate)
         self._list.itemActivated.connect(self._on_item_activated)
         self._stack.addWidget(self._list)            # índice 0
 
@@ -133,12 +277,6 @@ class LibraryView(QWidget):
             item = QListWidgetItem(g.display_name)
             item.setData(_PATH_ROLE, str(g.path))
             item.setToolTip(f"{g.display_name}\n{g.folder} · {g.path}")
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Insignia de color característico (estable por nombre) como mini-carátula.
-            item.setIcon(QIcon(_color_badge(_game_color(g.display_name))))
-            # sizeHint explícito = tamaño de tarjeta, para que el texto se
-            # envuelva en todo el ancho (si no, el ítem se encoge al texto).
-            item.setSizeHint(QSize(164, 122))
             self._list.addItem(item)
         self._apply_filter(self._search.text())
         self._stack.setCurrentWidget(
@@ -146,9 +284,11 @@ class LibraryView(QWidget):
         )
 
     def apply_palette(self, palette: Palette) -> None:
-        """Re-tiñe los iconos dependientes del tema (refrescar, guía vacía)."""
+        """Re-tiñe los iconos dependientes del tema y el acento de selección."""
         self._rescan_btn.setIcon(line_icon("refresh", 18, palette.accent))
         self._empty_page.apply_icon_color(palette.text_secondary)
+        self._delegate.accent = QColor(palette.accent)
+        self._list.viewport().update()
 
     # -- internos ------------------------------------------------------------
     def _apply_filter(self, text: str) -> None:
