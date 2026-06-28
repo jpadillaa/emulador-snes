@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 from .core.adapter import create_core
 from .core.session import SessionController
 from .services.gamepad_service import GamepadService
+from .services.library_service import LibraryService
 from .services.input_service import (
     InputService,
     MappingProfiles,
@@ -72,6 +74,7 @@ class MainWindow(QMainWindow):
         self._gamepad = GamepadService(parent=self)
         self._pad_by_name: dict[str, object] = {}   # nombre -> PadInfo
         self._saves = SaveService()
+        self._library = LibraryService(self._settings)
         # Perfiles de asignacion por dispositivo (migra el formato anterior).
         self._profiles = MappingProfiles.from_json(self._settings.profiles_json())
         self._profiles.ensure(KEYBOARD_KEY, gamepad=False)
@@ -116,7 +119,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(STACK_GAP)
 
-        self._stage = GameStage()
+        self._stage = GameStage(self._library)
         # En pantalla completa o maximizado se fuerza 4:3 (ver _aspect_locked).
         self._aspect_locked = False
         self._stage.set_scale_mode(self._scale_mode)
@@ -239,6 +242,8 @@ class MainWindow(QMainWindow):
 
         self._stage.request_load.connect(self._flow_load_game)
         self._stage.retry_requested.connect(self._flow_load_game)
+        self._stage.game_selected.connect(self._flow_load_game_path)
+        self._stage.library_manage_folders.connect(self._flow_manage_folders)
         self._stage.close_error_requested.connect(self._session.reset_to_empty)
         self._stage.resume_requested.connect(self._session.resume)
 
@@ -332,6 +337,8 @@ class MainWindow(QMainWindow):
     # -- maquina de estados --------------------------------------------------
     def _on_state_changed(self, state: SessionState) -> None:
         self._stage.show_state(state)
+        if state == SessionState.EMPTY:
+            self._stage.refresh_library()
         active = state in (SessionState.RUNNING, SessionState.PAUSED)
         self._action_bar.set_session_active(active)
         self._overlay.set_session_active(active)
@@ -369,10 +376,18 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return  # cancelado: sin cambios
+        self._flow_load_game_path(path)
+
+    def _flow_load_game_path(self, path: str) -> None:
         self._session.begin_loading(path)
         # Cede el control al event loop una vez (sin retraso artificial) para
         # que la vista CARGANDO se pinte antes de la carga sincrona del nucleo.
         QTimer.singleShot(0, self._session.finish_loading)
+
+    def _flow_manage_folders(self) -> None:
+        dlg = _FoldersDialog(self._library, self)
+        dlg.exec()
+        self._stage.refresh_library()
 
     def _flow_save_state(self) -> None:
         if not self._session.has_session:
@@ -643,3 +658,51 @@ class _SaveStateDialog(QDialog):
             return None
         item = self._list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+
+class _FoldersDialog(QDialog):
+    """Gestiona las carpetas que escanea la biblioteca (añadir/quitar)."""
+
+    def __init__(self, service, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Carpetas de la biblioteca")
+        self.setMinimumWidth(420)
+        self._service = service
+
+        layout = QVBoxLayout(self)
+        self._list = QListWidget()
+        layout.addWidget(self._list)
+
+        row = QHBoxLayout()
+        add_btn = QPushButton("Añadir…")
+        add_btn.clicked.connect(self._on_add)
+        remove_btn = QPushButton("Quitar")
+        remove_btn.clicked.connect(self._on_remove)
+        row.addWidget(add_btn)
+        row.addWidget(remove_btn)
+        row.addStretch()
+        close_btn = QPushButton("Cerrar")
+        close_btn.clicked.connect(self.accept)
+        row.addWidget(close_btn)
+        layout.addLayout(row)
+
+        self._reload()
+
+    def _reload(self) -> None:
+        self._list.clear()
+        self._list.addItems(self._service.folders())
+
+    def _on_add(self) -> None:
+        start = "ROMS" if os.path.isdir("ROMS") else os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Añadir carpeta de ROMs", start
+        )
+        if folder:
+            self._service.add_folder(folder)
+            self._reload()
+
+    def _on_remove(self) -> None:
+        item = self._list.currentItem()
+        if item is not None:
+            self._service.remove_folder(item.text())
+            self._reload()
