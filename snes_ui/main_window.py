@@ -40,6 +40,7 @@ from .services.input_service import (
     SNES_INPUTS,
 )
 from .services.save_service import SaveService
+from .services.sram_service import SramStore
 from .settings import AppSettings
 from .state import ConnectionState, ScaleMode, SessionState
 from .theme import (
@@ -69,7 +70,8 @@ class MainWindow(QMainWindow):
         self._settings = AppSettings()
         # Nucleo real (libretro) si la biblioteca esta disponible; si no, mock.
         self._core = create_core()
-        self._session = SessionController(self._core, self)
+        self._sram = SramStore()
+        self._session = SessionController(self._core, self, sram_store=self._sram)
         self._input = InputService(self)
         self._gamepad = GamepadService(parent=self)
         self._pad_by_name: dict[str, object] = {}   # nombre -> PadInfo
@@ -573,6 +575,8 @@ class MainWindow(QMainWindow):
         self._settings.set_scale_mode(self._scale_mode.value)
         self._settings.set_active_tab(self._panel.active_tab())
         self._gamepad.stop()
+        # Volcar el SRAM del juego en curso antes de liberar el nucleo.
+        self._session.flush_sram()
         # Liberar el nucleo nativo de forma ordenada.
         shutdown = getattr(self._core, "shutdown", None)
         if callable(shutdown):
