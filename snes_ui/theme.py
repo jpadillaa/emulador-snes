@@ -147,6 +147,7 @@ def build_stylesheet(name: ThemeName) -> str:
     error_tint_strong = "rgba(255, 69, 58, 0.28)" if is_dark else "rgba(255, 59, 48, 0.18)"
     # Lavado azul sutil para el hover de controles reasignables.
     accent_tint = "rgba(10, 132, 255, 0.16)" if is_dark else "rgba(0, 122, 255, 0.09)"
+    accent_tint_strong = "rgba(10, 132, 255, 0.30)" if is_dark else "rgba(0, 122, 255, 0.16)"
     # Centro (más claro) del gradiente radial del escenario, para darle volumen
     # en vez de un color plano.
     stage_center = "#18181B" if is_dark else "#F5F6FA"
@@ -283,6 +284,40 @@ def build_stylesheet(name: ThemeName) -> str:
         border: 1px solid {p.accent};
         color: {p.on_accent};
     }}
+
+    /* --- Campo de texto (igualado al ComboBox: misma altura y fuente) --- */
+    QLineEdit {{
+        background-color: {p.control_fill};
+        border: 1px solid {p.border};
+        border-radius: {RADIUS_CONTROL}px;
+        padding: 7px 10px;
+        font-size: 13px;
+        min-height: 18px;
+        color: {p.text_primary};
+        selection-background-color: {p.accent};
+        selection-color: {p.on_accent};
+    }}
+    QLineEdit:hover {{ background-color: {p.control_hover}; }}
+    QLineEdit:focus {{ border-color: {p.accent}; background-color: {p.control_fill}; }}
+
+    /* --- Botones de cabecera de la biblioteca (con color de acento) --- */
+    QPushButton#BotonCarpetas {{
+        background-color: {accent_tint};
+        border: 1px solid {p.accent};
+        border-radius: {RADIUS_CONTROL}px;
+        padding: 7px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        color: {p.accent};
+    }}
+    QPushButton#BotonCarpetas:hover {{ background-color: {accent_tint_strong}; }}
+    QToolButton#BotonRefrescarBiblioteca {{
+        background-color: {accent_tint};
+        border: 1px solid {p.accent};
+        border-radius: {RADIUS_CONTROL}px;
+        padding: 7px;
+    }}
+    QToolButton#BotonRefrescarBiblioteca:hover {{ background-color: {accent_tint_strong}; }}
 
     /* --- ComboBox --- */
     QComboBox {{

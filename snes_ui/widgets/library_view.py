@@ -7,7 +7,10 @@ las acciones para añadir una carpeta o abrir un archivo suelto.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+import hashlib
+
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -21,10 +24,35 @@ from PySide6.QtWidgets import (
 )
 
 from ..services.library_service import GameEntry
+from ..theme import Palette
 from .icons import line_icon
 from .state_card import StateCard
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
+
+
+def _game_color(name: str) -> QColor:
+    """Color característico y estable derivado del nombre del juego."""
+    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+    hue = int(digest[:8], 16) % 360
+    return QColor.fromHsl(hue, 135, 150)
+
+
+def _color_badge(color: QColor, size: int = 30) -> QPixmap:
+    """Pequeña insignia redondeada del color del juego (mini 'carátula')."""
+    dpr = 2
+    px = size * dpr
+    pm = QPixmap(px, px)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    r = px * 0.30
+    p.drawRoundedRect(QRectF(0, 0, px, px), r, r)
+    p.end()
+    pm.setDevicePixelRatio(dpr)
+    return pm
 
 
 class LibraryView(QWidget):
@@ -49,13 +77,14 @@ class LibraryView(QWidget):
         header.addWidget(self._search, stretch=1)
 
         self._folders_btn = QPushButton("Carpetas…")
+        self._folders_btn.setObjectName("BotonCarpetas")
         self._folders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._folders_btn.clicked.connect(self.manage_folders_requested.emit)
         header.addWidget(self._folders_btn)
 
         self._rescan_btn = QToolButton()
-        self._rescan_btn.setObjectName("BotonRefrescar")
-        self._rescan_btn.setIcon(line_icon("refresh", 18))
+        self._rescan_btn.setObjectName("BotonRefrescarBiblioteca")
+        self._rescan_btn.setIcon(line_icon("refresh", 18, "#007AFF"))
         self._rescan_btn.setToolTip("Re-escanear carpetas")
         self._rescan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._rescan_btn.clicked.connect(self.rescan_requested.emit)
@@ -77,8 +106,8 @@ class LibraryView(QWidget):
         # cortarse ("Chrono Trigger" → dos líneas, no "Chron...").
         self._list.setTextElideMode(Qt.TextElideMode.ElideNone)
         self._list.setSpacing(0)
-        self._list.setGridSize(QSize(176, 96))
-        self._list.setIconSize(QSize(0, 0))
+        self._list.setGridSize(QSize(176, 134))
+        self._list.setIconSize(QSize(30, 30))
         self._list.itemActivated.connect(self._on_item_activated)
         self._stack.addWidget(self._list)            # índice 0
 
@@ -105,14 +134,21 @@ class LibraryView(QWidget):
             item.setData(_PATH_ROLE, str(g.path))
             item.setToolTip(f"{g.display_name}\n{g.folder} · {g.path}")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Insignia de color característico (estable por nombre) como mini-carátula.
+            item.setIcon(QIcon(_color_badge(_game_color(g.display_name))))
             # sizeHint explícito = tamaño de tarjeta, para que el texto se
             # envuelva en todo el ancho (si no, el ítem se encoge al texto).
-            item.setSizeHint(QSize(164, 84))
+            item.setSizeHint(QSize(164, 122))
             self._list.addItem(item)
         self._apply_filter(self._search.text())
         self._stack.setCurrentWidget(
             self._list if games else self._empty_page
         )
+
+    def apply_palette(self, palette: Palette) -> None:
+        """Re-tiñe los iconos dependientes del tema (refrescar, guía vacía)."""
+        self._rescan_btn.setIcon(line_icon("refresh", 18, palette.accent))
+        self._empty_page.apply_icon_color(palette.text_secondary)
 
     # -- internos ------------------------------------------------------------
     def _apply_filter(self, text: str) -> None:

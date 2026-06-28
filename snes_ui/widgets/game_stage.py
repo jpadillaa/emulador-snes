@@ -126,6 +126,7 @@ class GameStage(QFrame):
         for card in (self._loading, self._pause.card):
             card.apply_icon_color(palette.text_secondary)
         self._error.apply_icon_color(palette.error)
+        self._library.apply_palette(palette)
 
     def refresh_library(self) -> None:
         self._library.set_games(self._service.scan())
