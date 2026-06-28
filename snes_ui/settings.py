@@ -6,6 +6,8 @@ modo de visualizacion del escenario, pestaña activa del panel y geometria.
 """
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import QSettings, QByteArray
 
 ORG = "SNESEmulatorDemo"
@@ -67,3 +69,18 @@ class AppSettings:
 
     def set_profiles_json(self, raw: str) -> None:
         self._s.setValue("input/mappings", raw)
+
+    # -- biblioteca de ROMs --------------------------------------------------
+    def library_folders(self) -> list[str]:
+        raw = self._s.value("library/folders")
+        if isinstance(raw, str):
+            try:
+                val = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                val = None
+            if isinstance(val, list):
+                return [str(x) for x in val]
+        return ["ROMS"]
+
+    def set_library_folders(self, folders: list[str]) -> None:
+        self._s.setValue("library/folders", json.dumps(list(folders)))
